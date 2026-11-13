@@ -11,7 +11,7 @@ on:
           - apk
           - aab
 permissions:
-  contents: read
+  contents: write
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -51,17 +51,20 @@ jobs:
           else
             gradle --no-daemon :app:assembleRelease
           fi
-      - name: Upload signed APK
-        if: inputs.format == 'apk'
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-release-apk
-          path: app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
-      - name: Upload Google Play bundle
-        if: inputs.format == 'aab'
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-play-bundle-aab
-          path: app/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
+      - name: Publish on the Releases page
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED_FORMAT: ${{ inputs.format }}
+        run: |
+          VERSION=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          TAG="v${VERSION}-build${GITHUB_RUN_NUMBER}"
+          mkdir -p release-files
+          if [ "$REQUESTED_FORMAT" = 'aab' ]; then
+            cp app/build/outputs/bundle/release/*.aab "release-files/Haluvi-Navigation-${VERSION}.aab"
+          else
+            cp app/build/outputs/apk/release/*.apk "release-files/Haluvi-Navigation-${VERSION}.apk"
+          fi
+          gh release create "$TAG" release-files/* \
+            --target "$GITHUB_SHA" \
+            --title "Haluvi Navigation ${VERSION} (build ${GITHUB_RUN_NUMBER})" \
+            --notes "Signed ${REQUESTED_FORMAT} built from ${GITHUB_REF_NAME} (${GITHUB_SHA::7})."
