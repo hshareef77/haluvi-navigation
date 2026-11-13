@@ -58,21 +58,21 @@ class OnlineSearchScreen(private val mode: Mode) : Screen() {
                 ))
             }
         }
-        val edit = ui.edit("Type place name or category", st.query) { run(it) }
-        ui.row("Search" to { run(edit.text.toString()) }, "Clear" to { st.query = ""; host.rebuild() })
+        val edit = ui.edit("Type place name or category", st.query) { doSearch(it) }
+        ui.row("Search" to { doSearch(edit.text.toString()) }, "Clear" to { st.query = ""; host.rebuild() })
         ui.heading("Quick searches")
         listOf(
             "Mosques" to "mosque", "Hospitals and pharmacies" to "hospital health clinic pharmacy",
             "Shops and markets" to "shop supermarket market", "Restaurants and cafes" to "restaurant cafe",
             "Ferry terminals and harbors" to "ferry terminal harbor jetty", "Schools" to "school",
             "Banks and ATMs" to "bank atm", "Hotels and guest houses" to "hotel guest house"
-        ).forEach { (label, q) -> ui.button(label) { run(q) } }
+        ).forEach { (label, q) -> ui.button(label) { doSearch(q) } }
         if (st.results.isNotEmpty()) ui.button("Show last results: ${st.results.size}") { host.show { OnlineResultsScreen(mode) } }
         ui.button("Back") { host.back() }
         return scroll
     }
 
-    private fun run(text: String, wide: Boolean = false) {
+    private fun doSearch(text: String, wide: Boolean = false) {
         val g = AppGraph
         val st = OnlineSearchState
         val q = text.trim()
@@ -117,7 +117,7 @@ class OnlineSearchScreen(private val mode: Mode) : Screen() {
     }
 
     /** Called from the results screen to search a wider area. */
-    fun loadMore() = run(OnlineSearchState.query, wide = true)
+    fun loadMore() = doSearch(OnlineSearchState.query, wide = true)
 
     override fun onDispose() {
         if (busyText != null) { job?.cancel(); busyText = null }

@@ -355,7 +355,8 @@ class NavigationEngine(
                 lastSpeedDist = dist; lastSpeedMs = now
             }
         } else { lastSpeedDist = dist; lastSpeedMs = now }
-        if (chosen != null && chosen >= 0) smoothedSpeed = smoothedSpeed?.let { it * 0.65 + chosen * 0.35 } ?: chosen
+        val c = chosen
+        if (c != null && c >= 0) smoothedSpeed = smoothedSpeed?.let { it * 0.65 + c * 0.35 } ?: c
         return smoothedSpeed
     }
 
