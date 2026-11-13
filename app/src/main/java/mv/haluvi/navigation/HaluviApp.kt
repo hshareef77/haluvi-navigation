@@ -1,0 +1,53 @@
+package mv.haluvi.navigation
+
+import android.app.Application
+import mv.haluvi.navigation.data.IslandRepository
+import mv.haluvi.navigation.data.LocationStore
+import mv.haluvi.navigation.data.Settings
+import mv.haluvi.navigation.feedback.Haptics
+import mv.haluvi.navigation.feedback.Speaker
+import mv.haluvi.navigation.nav.ExploreEngine
+import mv.haluvi.navigation.nav.NavigationEngine
+import mv.haluvi.navigation.net.GoogleMaps
+import mv.haluvi.navigation.net.OpenStreetMap
+import mv.haluvi.navigation.sensors.CompassTracker
+import mv.haluvi.navigation.sensors.LocationTracker
+
+class HaluviApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        AppGraph.init(this)
+    }
+}
+
+/** Application-wide singletons. Navigation lives here so it survives screen changes and runs with the screen off. */
+object AppGraph {
+    lateinit var settings: Settings; private set
+    lateinit var islands: IslandRepository; private set
+    lateinit var store: LocationStore; private set
+    lateinit var location: LocationTracker; private set
+    lateinit var compass: CompassTracker; private set
+    lateinit var speaker: Speaker; private set
+    lateinit var haptics: Haptics; private set
+    lateinit var google: GoogleMaps; private set
+    lateinit var osm: OpenStreetMap; private set
+    lateinit var nav: NavigationEngine; private set
+    lateinit var explore: ExploreEngine; private set
+
+    fun init(app: Application) {
+        settings = Settings(app)
+        islands = IslandRepository(app)
+        store = LocationStore(app, islands)
+        location = LocationTracker(app)
+        compass = CompassTracker(app)
+        speaker = Speaker(app, settings)
+        haptics = Haptics(app, settings)
+        google = GoogleMaps { settings.googleApiKey }
+        osm = OpenStreetMap()
+        nav = NavigationEngine(app, settings, islands, store, location, compass, speaker, haptics, google)
+        explore = ExploreEngine(app, settings, islands, store, location, compass, speaker, google, nav)
+        compass.onCalibrationNeeded = {
+            if (nav.isActive || explore.active) speaker.speak("Compass needs calibration. Move the phone in a figure eight.", flush = false)
+        }
+    }
+}
