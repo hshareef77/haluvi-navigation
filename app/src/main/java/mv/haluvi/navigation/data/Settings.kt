@@ -18,43 +18,41 @@ enum class TravelMode(val label: String, val routesApi: String, val directionsAp
 class Settings(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("haluvi_settings", Context.MODE_PRIVATE)
 
+    // Voice and vibration
     var voiceOn by bool("voiceOn", true)
     var speechRate by float("speechRate", 1.0f)
     var vibrationOn by bool("vibrationOn", true)
-    var directionVoiceHintsOn by bool("directionVoiceHintsOn", false)
-    var keepAwake by bool("keepAwake", true)
-    var autoIslandDetectionOn by bool("autoIslandDetectionOn", true)
-    var islandArrivalIdentityOn by bool("islandArrivalIdentityOn", true)
-
-    /** Half-width of the direction focus window in degrees (Lua v22+: 1 degree). */
-    var focusAccuracy by int("focusAccuracy", 1)
     var focusVibration by string("focusVibration", VibrationPatterns.CONTINUOUS)
     var arrivalVibration by string("arrivalVibration", "Strong confirmation")
-    var correctionIntervalSec by int("correctionInterval", 4)
 
-    var arrivalDistance by int("arrivalDistance", 5)
-    var islandArrivalDistance by int("islandArrivalDistance", 1000)
-    var nearestLocationDistance by int("nearestLocationDistance", 100)
-    var nearestIslandArea by int("nearestIslandArea", 10000)
+    // Navigation
+    /** Half-width of the pointing window in degrees (vibrates when the phone points at the destination). */
+    var focusAccuracy by int("focusAccuracy", 3)
+    var directionVoiceHintsOn by bool("directionVoiceHintsOn", false)
     var turnAnnouncementsOn by bool("turnAnnouncementsOn", true)
+    var keepAwake by bool("keepAwake", false)
+    var arrivalDistance by int("arrivalDistance", 10)
+    var islandArrivalDistance by int("islandArrivalDistance", 1000)
+    var islandArrivalIdentityOn by bool("islandArrivalIdentityOn", true)
+
+    // How directions and distances are spoken
+    /** true: "2 o'clock". false: "north east, 45 degrees". */
+    var clockDirections by bool("clockDirections", true)
+    var milesToo by bool("milesToo", false)
 
     var travelModeName by string("travelMode", TravelMode.WALKING.name)
     var travelMode: TravelMode
         get() = runCatching { TravelMode.valueOf(travelModeName) }.getOrDefault(TravelMode.WALKING)
         set(v) { travelModeName = v.name }
 
+    // Google Maps
     var googleEnabled by bool("googleMapsEnabled", false)
     var googleApiKey by string("googleMapsApiKey", "")
     var googleLastStatus by string("googleMapsLastStatus", "")
-    var onlineProvider by string("onlineSearchProvider", "Google Maps")
 
-    var exploreCategory by string("exploreCategory", "All")
-    var exploreRadius by int("exploreRadiusMeters", 500)
-
-    var homeTab by string("homeTab", "Home")
-    var manualCurrentPlaceId by string("manualCurrentPlaceId", "")
-    var manualCurrentIslandKey by string("manualCurrentIslandKey", "")
+    // Map data and "What's around me"
     var mapDataIslandKey by string("mapDataIslandKey", "")
+    var aroundCategory by string("aroundCategory", "all")
 
     val googleReady: Boolean get() = googleEnabled && googleApiKey.isNotBlank()
 

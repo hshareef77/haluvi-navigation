@@ -9,8 +9,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import mv.haluvi.navigation.core.Fmt
 import mv.haluvi.navigation.core.Geo
+import mv.haluvi.navigation.data.Categories
+import mv.haluvi.navigation.data.DownloadedRoad
 import mv.haluvi.navigation.data.IslandRepository
 import mv.haluvi.navigation.data.LocationStore
 import mv.haluvi.navigation.data.SavedLocation
@@ -18,30 +19,25 @@ import mv.haluvi.navigation.data.Settings
 import mv.haluvi.navigation.data.TravelMode
 import mv.haluvi.navigation.feedback.Speaker
 import mv.haluvi.navigation.net.GoogleMaps
-import mv.haluvi.navigation.net.OnlinePlace
-import mv.haluvi.navigation.sensors.CompassTracker
 import mv.haluvi.navigation.sensors.Fix
 import mv.haluvi.navigation.sensors.LocationTracker
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
-
-data class ExplorePlace(
-    val name: String,
-    val lat: Double,
-    val lon: Double,
-    val categoryText: String,
-    val source: String,
-    val saved: SavedLocation?,
-    var distance: Double = 0.0,
-    var bearing: Double = 0.0,
-    var side: String = ""
-) {
-    val key: String get() = name.lowercase() + "@" + String.format(Locale.US, "%.5f,%.5f", lat, lon)
-}
+import kotlin.math.abs
 
 /**
- * Explore mode: tells you what is around you while you move, without a destination.
- * Speech priority (Lua v130): navigation maneuver > road change > junction > nearby place.
+ * Explore: speaks only three things, and only when it is sure.
+ *  1. Your road ("On Majeedhee Magu.")
+ *  2. Intersections on your road ("Intersection with Chandhanee Magu, 30 meters.")
+ *  3. Important places as you pass ("Pharmacy, on your right, 20 meters.")
+ *
+ * Reliability rules:
+ *  - Uses only fresh, accurate GPS. When GPS is weak it says once "Explore paused" and stays quiet.
+ *  - Left/right comes from your walking direction (GPS movement), never from a phone in a pocket.
+ *  - Road comes from downloaded map roads when available (matched to the road line and your direction),
+ *    otherwise from Google, and must be confirmed twice before it is spoken.
+ *  - Intersections only on the road you are on (needs downloaded island map data).
+ *  - Each place is spoken once; important places first; it never talks over a navigation turn.
  */
 class ExploreEngine(
     private val context: Context,
@@ -49,64 +45,61 @@ class ExploreEngine(
     private val islands: IslandRepository,
     private val store: LocationStore,
     private val location: LocationTracker,
-    private val compass: CompassTracker,
     private val speaker: Speaker,
     private val google: GoogleMaps,
     private val nav: NavigationEngine
 ) {
-    companion object {
-        val CATEGORIES = listOf(
-            "All" to "All places",
-            "Shops" to "Shops and markets",
-            "Mosque" to "Mosques",
-            "Health" to "Hospital, health centre, clinic, pharmacy",
-            "Food" to "Restaurants and cafes",
-            "Transport" to "Ferry, harbor, jetty, transport",
-            "Saved" to "Your saved locations"
-        )
-        val RADII = listOf(100, 250, 500, 1000, 2000, 5000)
-    }
-
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
+    private val now: Long get() = SystemClock.elapsedRealtime()
 
     var active = false; private set
-    var results: List<ExplorePlace> = emptyList(); private set
-    var roadStatus = "Current road: checking."; private set
-    var message = "Exploration is stopped."; private set
+    var paused = false; private set
+    var statusText = "Explore is off."; private set
+    var roadText = ""; private set
+    var lastSpoken = ""; private set
+    var hasMapRoads = false; private set
 
-    private var googleResults: List<ExplorePlace> = emptyList()
-    private var googleBusy = false
-    private var googleLastMs = 0L
-    private var googleLat: Double? = null
-    private var googleLon: Double? = null
+    // GPS gate
+    private var goodCount = 0
+    private var badSinceMs = 0L
 
-    private var roadBusy = false
-    private var roadLastMs = 0L
-    private var roadLat: Double? = null
-    private var roadLon: Double? = null
+    // Road
     private var confirmedRoad = ""
     private var candidateRoad = ""
     private var candidateCount = 0
+    private var roadBusy = false
+    private var roadLastMs = 0L
+    private var roadLat = 0.0
+    private var roadLon = 0.0
+    private var currentRoadIndex = -1
 
-    private var speechLastMs = 0L
-    private var speechLastPriority = 0
-    private val placeSeen = HashMap<String, Pair<Boolean, Long>>()
-    private var lastJunctionKey = ""
-    private var lastJunctionMs = 0L
-    private var junctionCacheKey = ""
+    // Roads / junctions cache for the current island
+    private var roadsIslandKey = ""
+    private var roads: List<DownloadedRoad> = emptyList()
     private var junctions: List<Junction> = emptyList()
+    private val spokenJunctions = HashMap<String, Long>()
 
-    private data class Junction(val key: String, val lat: Double, val lon: Double, val names: List<String>)
+    // Places
+    private var googlePlaces: List<PlaceCandidate> = emptyList()
+    private var googleBusy = false
+    private var googleLastMs = 0L
+    private var googleLat = 0.0
+    private var googleLon = 0.0
+    private val spokenPlaces = HashMap<String, Long>()
+    private var lastSpeakMs = 0L
 
-    private val now: Long get() = SystemClock.elapsedRealtime()
+    private data class Junction(val key: String, val lat: Double, val lon: Double, val roadIdx: Set<Int>)
+    private data class PlaceCandidate(val name: String, val lat: Double, val lon: Double, val categoryId: String, val saved: Boolean) {
+        val key: String get() = name.lowercase() + "@" + String.format(Locale.US, "%.4f,%.4f", lat, lon)
+    }
 
     private val loop = object : Runnable {
         override fun run() {
             if (!active) return
-            refresh(false)
-            main.postDelayed(this, 3000)
+            runCatching { step() }
+            main.postDelayed(this, 2000)
         }
     }
 
@@ -114,19 +107,16 @@ class ExploreEngine(
     fun removeListener(l: () -> Unit) { listeners.remove(l) }
     private fun notifyChanged() { listeners.forEach { runCatching { it() } } }
 
-    val categoryLabel: String get() = settings.exploreCategory
-    val radius: Int get() = settings.exploreRadius
-
     fun start() {
         if (active) return
-        active = true
-        placeSeen.clear(); speechLastMs = 0; speechLastPriority = 0
-        confirmedRoad = ""; candidateRoad = ""; candidateCount = 0
-        googleLastMs = 0; roadLastMs = 0; lastJunctionKey = ""
-        roadStatus = "Current road: checking."
-        message = "Checking nearby places."
+        active = true; paused = false
+        goodCount = 0; badSinceMs = 0
+        confirmedRoad = ""; candidateRoad = ""; candidateCount = 0; currentRoadIndex = -1
+        spokenPlaces.clear(); spokenJunctions.clear(); googlePlaces = emptyList(); googleLastMs = 0
+        roadText = ""; lastSpoken = ""
+        statusText = "Explore is on. Waiting for good GPS."
         NavigationService.ensureRunning(context)
-        speaker.speak("Exploration started.")
+        speaker.speak("Explore on.")
         main.removeCallbacks(loop)
         main.post(loop)
         notifyChanged()
@@ -136,255 +126,231 @@ class ExploreEngine(
         if (!active) return
         active = false
         main.removeCallbacks(loop)
-        results = emptyList(); googleResults = emptyList()
-        message = "Exploration is stopped."
-        if (!silent) speaker.speak("Exploration stopped.")
+        statusText = "Explore is off."
+        roadText = ""
+        if (!silent) speaker.speak("Explore off.")
         NavigationService.updateOrStop(context)
         notifyChanged()
     }
 
     fun toggle() { if (active) stop() else start() }
 
-    fun setCategory(c: String) { settings.exploreCategory = c; googleLastMs = 0; googleResults = emptyList(); if (active) refresh(true) }
-    fun setRadius(r: Int) { settings.exploreRadius = r; googleLastMs = 0; if (active) refresh(true) }
-
     // ------------------------------------------------------------------
 
-    private fun travelHeading(f: Fix): Double = if (f.bearing != null && (f.speedMps ?: 0.0) >= 0.45) f.bearing else compass.heading
-
-    private fun categoryMatches(text: String, source: String, category: String): Boolean {
-        val t = text.lowercase()
-        fun has(vararg w: String) = w.any { t.contains(it) }
-        return when (category) {
-            "All" -> true
-            "Saved" -> source == SavedLocation.SOURCE_MANUAL
-            "Shops" -> has("shop", "market", "store", "supermarket", "grocery")
-            "Mosque" -> has("mosque", "masjid")
-            "Health" -> has("hospital", "health", "clinic", "pharmacy", "doctor")
-            "Food" -> has("restaurant", "cafe", "coffee", "food", "bakery")
-            "Transport" -> has("ferry", "harbor", "harbour", "jetty", "bus", "terminal", "pier")
-            else -> true
-        }
-    }
-
-    private fun googleQuery(): String? = when (settings.exploreCategory) {
-        "Saved" -> null
-        "Shops" -> "shops supermarkets grocery stores markets"
-        "Mosque" -> "mosques masjids"
-        "Health" -> "hospitals health centres clinics pharmacies"
-        "Food" -> "restaurants cafes"
-        "Transport" -> "ferry terminals harbors jetties bus stops"
-        else -> "nearby places businesses landmarks services"
-    }
-
-    fun refresh(force: Boolean) {
-        if (!active) return
-        val f = location.freshFix(30_000)
-        if (f == null) {
-            message = "Waiting for GPS. Please stay in an open area."
+    private fun step() {
+        val f = location.fix
+        val driving = settings.travelMode == TravelMode.DRIVING
+        val good = f != null && f.ageMs <= 6000 && f.accuracy <= (if (driving) 30.0 else 25.0)
+        if (!good) {
+            goodCount = 0
+            if (badSinceMs == 0L) badSinceMs = now
+            if (!paused && now - badSinceMs >= 8000) {
+                paused = true
+                statusText = "GPS is weak. Explore paused."
+                say("GPS is weak. Explore paused.", force = true)
+            } else if (!paused) {
+                statusText = "Waiting for good GPS."
+            }
             notifyChanged()
             return
         }
-        collect(f)
-        fetchGoogle(f, force)
-        checkRoad(f, force)
-        speakNearestPlace(f)
-        checkJunction(f)
+        badSinceMs = 0
+        goodCount++
+        if (paused) {
+            if (goodCount < 2) return
+            paused = false
+            say("GPS good. Explore on.", force = true)
+        }
+        f!!
+        loadRoadsFor(f)
+        val moving = (f.speedMps ?: 0.0) >= 0.5 && f.bearing != null
+        statusText = if (moving) "Exploring." else "Exploring. Start walking to hear places on your left and right."
+
+        // One announcement per step, in priority order: road > intersection > place.
+        val spokeRoad = checkRoad(f, moving)
+        if (!spokeRoad && moving) {
+            val spokeJunction = checkJunction(f)
+            if (!spokeJunction) checkPlaces(f)
+        }
+        if (moving) fetchGooglePlaces(f)
         notifyChanged()
     }
 
-    private fun collect(f: Fix) {
-        val radius = settings.exploreRadius.toDouble()
-        val cat = settings.exploreCategory
-        val heading = travelHeading(f)
-        val out = LinkedHashMap<String, ExplorePlace>()
-        fun add(p: ExplorePlace) {
-            p.distance = Geo.distance(f.lat, f.lon, p.lat, p.lon)
-            if (p.distance > radius) return
-            if (!categoryMatches(p.name + " " + p.categoryText + " " + (p.saved?.categoryId ?: ""), p.source, cat)) return
-            p.bearing = Geo.bearing(f.lat, f.lon, p.lat, p.lon)
-            p.side = Geo.relativeSide(heading, p.bearing)
-            out.putIfAbsent(p.key, p)
+    private fun say(text: String, force: Boolean = false): Boolean {
+        if (!force) {
+            if (nav.imminentManeuver()) return false
+            if (now - lastSpeakMs < 3000) return false
         }
-        store.items.forEach { add(ExplorePlace(it.name, it.lat, it.lon, it.categoryName, it.source, it)) }
-        googleResults.forEach { add(it.copy()) }
-        results = out.values.sortedBy { it.distance }
-        message = if (results.isEmpty()) "No places found within ${Fmt.meters(radius)}." else "${results.size} places nearby."
+        lastSpeakMs = now
+        lastSpoken = text
+        speaker.speak(text, flush = force)
+        return true
     }
 
-    private fun fetchGoogle(f: Fix, force: Boolean) {
-        if (googleBusy || !settings.googleReady) return
-        val q = googleQuery() ?: run { googleResults = emptyList(); return }
-        val moved = if (googleLat == null) Double.MAX_VALUE else Geo.distance(googleLat!!, googleLon!!, f.lat, f.lon)
-        val fast = (f.speedMps ?: 0.0) >= 3.3
-        if (!force && googleLastMs > 0 && now - googleLastMs < (if (fast) 45_000 else 90_000) && moved < (if (fast) 100 else 45)) return
-        googleBusy = true
-        googleLastMs = now; googleLat = f.lat; googleLon = f.lon
-        val island = islands.nearest(f.lat, f.lon)?.island?.name
-        val query = if (island != null) "$q in $island, Maldives" else q
-        val radius = settings.exploreRadius.coerceIn(100, 5000)
-        scope.launch {
-            val r = withContext(Dispatchers.IO) { runCatching { google.searchText(query, f.lat, f.lon, radius) } }
-            googleBusy = false
-            r.onSuccess { list: List<OnlinePlace> ->
-                googleResults = list.map { ExplorePlace(it.name, it.lat, it.lon, it.typeText, "google", null) }
-                if (active) location.fix?.let { collect(it); notifyChanged() }
+    // ---------------- roads ----------------
+
+    private fun loadRoadsFor(f: Fix) {
+        val key = islands.nearest(f.lat, f.lon)?.island?.key ?: return
+        if (key == roadsIslandKey) return
+        roadsIslandKey = key
+        roads = store.loadRoads(key)
+        hasMapRoads = roads.isNotEmpty()
+        currentRoadIndex = -1
+        spokenJunctions.clear()
+        // Junctions: points shared by two or more roads (OpenStreetMap roads share a node at real intersections).
+        val nodes = HashMap<String, Pair<DoubleArray, MutableSet<Int>>>()
+        roads.forEachIndexed { ri, r ->
+            r.points.forEach { p ->
+                val k = String.format(Locale.US, "%.6f,%.6f", p[0], p[1])
+                nodes.getOrPut(k) { p to HashSet() }.second.add(ri)
             }
         }
+        junctions = nodes.filter { it.value.second.size >= 2 }.map { (k, v) -> Junction(k, v.first[0], v.first[1], v.second) }
     }
 
-    private fun checkRoad(f: Fix, force: Boolean) {
-        // Prefer the road from the active Google route (Lua v128).
+    /** Matches the position to a downloaded road: close to the line and, when moving, along your direction. */
+    private fun snapToRoad(f: Fix, moving: Boolean): Pair<Int, Double>? {
+        if (roads.isEmpty()) return null
+        val maxD = maxOf(15.0, f.accuracy)
+        var best = -1
+        var bestScore = Double.MAX_VALUE
+        var bestD = 0.0
+        roads.forEachIndexed { ri, r ->
+            for (i in 0 until r.points.size - 1) {
+                val a = r.points[i]; val b = r.points[i + 1]
+                val d = Geo.distanceToSegment(f.lat, f.lon, a[0], a[1], b[0], b[1])
+                if (d > maxD) continue
+                var score = d
+                if (moving && f.bearing != null) {
+                    val segB = Geo.bearing(a[0], a[1], b[0], b[1])
+                    val diff = Geo.angleBetween(f.bearing, segB)
+                    val along = minOf(diff, 180 - diff) // either direction along the road
+                    if (along > 45) continue
+                    score += along * 0.3
+                }
+                if (ri == currentRoadIndex) score -= 3 // small preference to stay on the same road
+                if (score < bestScore) { bestScore = score; best = ri; bestD = d }
+            }
+        }
+        return if (best >= 0) best to bestD else null
+    }
+
+    private fun checkRoad(f: Fix, moving: Boolean): Boolean {
+        // 1) Active Google route knows the road.
         val routeRoad = nav.currentRouteRoadName()
-        if (routeRoad.isNotBlank()) { acceptRoad(routeRoad, f); return }
-        if (roadBusy) return
-        if (!settings.googleReady) {
-            roadStatus = nearestDownloadedRoad(f)?.let { "Current road: $it." } ?: "Current road: unavailable without Google Maps."
-            nearestDownloadedRoad(f)?.let { acceptRoad(it, f) }
-            return
+        if (routeRoad.isNotBlank()) return acceptRoad(routeRoad, moving, strong = true)
+
+        // 2) Downloaded map roads.
+        val snap = snapToRoad(f, moving)
+        if (snap != null) {
+            currentRoadIndex = snap.first
+            val name = roads[snap.first].name
+            if (name.isBlank()) { roadText = "Road: unnamed road."; return false }
+            return acceptRoad(name, moving, strong = snap.second <= 8 && moving)
         }
-        val moved = if (roadLat == null) Double.MAX_VALUE else Geo.distance(roadLat!!, roadLon!!, f.lat, f.lon)
-        val speed = f.speedMps ?: 0.0
+        if (roads.isNotEmpty()) currentRoadIndex = -1
+
+        // 3) Google reverse geocoding (only while moving; it is unreliable near corners when standing).
+        if (!settings.googleReady || roadBusy || !moving) return false
         val driving = settings.travelMode == TravelMode.DRIVING
-        val (interval, need) = when {
-            driving || speed >= 3.3 -> 5000L to 10.0
-            speed >= 0.5 -> 7000L to 5.0
-            else -> 12000L to 7.0
-        }
-        if (!force && now - roadLastMs < interval && moved < need) return
+        val moved = Geo.distance(roadLat, roadLon, f.lat, f.lon)
+        if (now - roadLastMs < (if (driving) 5000 else 8000) || moved < 10) return false
         roadBusy = true; roadLastMs = now; roadLat = f.lat; roadLon = f.lon
         scope.launch {
             val r = withContext(Dispatchers.IO) { runCatching { google.reverseGeocode(f.lat, f.lon) } }
             roadBusy = false
             if (!active) return@launch
-            r.onSuccess { g ->
-                when {
-                    g.road.isNotBlank() -> acceptRoad(g.road, f)
-                    g.address.isNotBlank() -> roadStatus = "Current area: ${g.address}."
-                }
-            }.onFailure { roadStatus = "Current road: temporarily unavailable." }
+            r.getOrNull()?.road?.takeIf { it.isNotBlank() }?.let { acceptRoad(it, true, strong = false) }
             notifyChanged()
         }
+        return false
     }
 
-    /** Offline fallback: nearest downloaded OpenStreetMap road within 25 m. */
-    private fun nearestDownloadedRoad(f: Fix): String? {
-        val island = islands.nearest(f.lat, f.lon)?.island ?: return null
-        var best: String? = null
-        var bestD = 25.0
-        for (r in store.loadRoads(island.key)) {
-            if (r.name.isBlank()) continue
-            for (i in 0 until r.points.size - 1) {
-                val a = r.points[i]; val b = r.points[i + 1]
-                val d = Geo.distanceToSegment(f.lat, f.lon, a[0], a[1], b[0], b[1])
-                if (d < bestD) { bestD = d; best = r.name }
-            }
-        }
-        return best
-    }
-
-    private fun acceptRoad(road: String, f: Fix) {
+    /** A road is spoken only after it is confirmed (twice, or once when the match is very clear). */
+    private fun acceptRoad(road: String, moving: Boolean, strong: Boolean): Boolean {
         if (candidateRoad.equals(road, true)) candidateCount++ else { candidateRoad = road; candidateCount = 1 }
-        val goodMovingFix = (f.speedMps ?: 0.0) >= 0.7 && f.accuracy <= 35
-        val needed = if (confirmedRoad.isEmpty() || goodMovingFix) 1 else 2
-        if (candidateCount >= needed) {
-            val old = confirmedRoad
-            confirmedRoad = road
-            roadStatus = "Current road: $road."
-            if (old.isEmpty()) say(70, "You are on $road.")
-            else if (!old.equals(road, true)) say(70, "You are now on $road.")
-        } else {
-            roadStatus = "Current road: confirming $road."
+        val needed = if (strong) 1 else 2
+        if (candidateCount < needed) return false
+        roadText = "Road: $road."
+        if (confirmedRoad.equals(road, true)) return false
+        confirmedRoad = road
+        if (!moving && lastSpoken.isNotEmpty()) return false
+        return say("On $road.")
+    }
+
+    private fun checkJunction(f: Fix): Boolean {
+        val ri = currentRoadIndex
+        if (ri < 0 || f.bearing == null) return false
+        val driving = settings.travelMode == TravelMode.DRIVING || (f.speedMps ?: 0.0) >= 3.5
+        val maxD = if (driving) 120.0 else 50.0
+        var best: Junction? = null
+        var bestD = Double.MAX_VALUE
+        for (j in junctions) {
+            if (ri !in j.roadIdx) continue
+            val d = Geo.distance(f.lat, f.lon, j.lat, j.lon)
+            if (d < 8 || d > maxD) continue
+            if (Geo.angleBetween(f.bearing, Geo.bearing(f.lat, f.lon, j.lat, j.lon)) > 30) continue
+            if (d < bestD) { bestD = d; best = j }
         }
+        val j = best ?: return false
+        if ((spokenJunctions[j.key] ?: 0L) > now - 180_000) return false
+        val others = j.roadIdx.filter { it != ri }.map { roads[it].name }.filter { it.isNotBlank() && !it.equals(confirmedRoad, true) }.distinct()
+        val text = if (others.isNotEmpty()) "Intersection with ${others.first()}, ${Phrases.distance(bestD)}." else "Intersection, ${Phrases.distance(bestD)}."
+        if (say(text)) { spokenJunctions[j.key] = now; return true }
+        return false
     }
 
-    private fun say(priority: Int, text: String, force: Boolean = false): Boolean {
-        if (!active || text.isBlank()) return false
-        if (!force && nav.imminentManeuver()) return false
-        val gap = now - speechLastMs
-        if (!force) {
-            if (gap < 3500 && priority <= speechLastPriority) return false
-            if (gap < 1800) return false
+    // ---------------- places ----------------
+
+    private fun priority(p: PlaceCandidate): Int = when {
+        p.saved -> 0
+        p.categoryId in setOf("mosque", "health", "ferry") -> 1
+        p.categoryId in setOf("shop", "food", "school", "bank", "police", "hotel") -> 2
+        else -> 3
+    }
+
+    private fun checkPlaces(f: Fix): Boolean {
+        val heading = f.bearing ?: return false
+        val driving = settings.travelMode == TravelMode.DRIVING || (f.speedMps ?: 0.0) >= 3.5
+        val maxD = if (driving) 100.0 else 30.0
+        val candidates = ArrayList<Triple<PlaceCandidate, Double, String>>()
+        fun consider(p: PlaceCandidate) {
+            if (p.name.startsWith("Unnamed")) return
+            val d = Geo.distance(f.lat, f.lon, p.lat, p.lon)
+            if (d > maxD) return
+            if ((spokenPlaces[p.key] ?: 0L) > now - 600_000) return
+            val side = Geo.relativeSide(heading, Geo.bearing(f.lat, f.lon, p.lat, p.lon))
+            if (side == "behind") return
+            candidates.add(Triple(p, d, side))
         }
-        speechLastMs = now; speechLastPriority = priority
-        speaker.speak(text)
-        return true
-    }
-
-    private fun announceThreshold(f: Fix): Double {
-        val speed = f.speedMps ?: 0.0
-        val auto = when { speed >= 8 -> 350.0; speed >= 3.3 -> 220.0; speed >= 1.3 -> 130.0; else -> 80.0 }
-        return minOf(settings.exploreRadius.toDouble(), auto)
-    }
-
-    private fun speakNearestPlace(f: Fix) {
-        val heading = travelHeading(f)
-        var best: ExplorePlace? = null
-        var bestScore = Double.MAX_VALUE
-        for (p in results) {
-            if (p.side == "behind") continue
-            val score = p.distance + (if (p.side == "ahead") 0.0 else 35.0) + Geo.angleBetween(heading, p.bearing) * 0.8
-            if (score < bestScore) { bestScore = score; best = p }
+        store.nearest(f.lat, f.lon).asSequence().takeWhile { it.distance <= maxD }.forEach {
+            consider(PlaceCandidate(it.loc.name, it.loc.lat, it.loc.lon, it.loc.categoryId, it.loc.source == SavedLocation.SOURCE_MANUAL))
         }
-        val n = now
-        placeSeen.entries.removeAll { n - it.value.second > 120_000 }
-        val p = best ?: return
-        if (p.distance > announceThreshold(f)) return
-        val state = placeSeen[p.key]
-        placeSeen[p.key] = (state?.first ?: false) to n
-        if (state?.first == true) return
-        if (say(40, "${p.name} ${p.side}, ${Fmt.meters(p.distance)}.")) placeSeen[p.key] = true to n
+        googlePlaces.forEach { consider(it) }
+        val pick = candidates.minWithOrNull(compareBy({ priority(it.first) }, { it.second })) ?: return false
+        val (p, d, side) = pick
+        val text = "${p.name}, $side, ${Phrases.distance(d)}."
+        if (say(text)) {
+            spokenPlaces[p.key] = now
+            // Also mark near-duplicates (same name close by) as spoken.
+            candidates.filter { it.first.name.equals(p.name, true) }.forEach { spokenPlaces[it.first.key] = now }
+            return true
+        }
+        return false
     }
 
-    private fun buildJunctions(islandKey: String): List<Junction> {
-        if (junctionCacheKey == islandKey) return junctions
-        val nodes = HashMap<String, Pair<DoubleArray, MutableSet<Int>>>()
-        val names = HashMap<String, MutableSet<String>>()
-        store.loadRoads(islandKey).forEachIndexed { ri, road ->
-            road.points.forEach { p ->
-                val key = String.format(Locale.US, "%.5f,%.5f", p[0], p[1])
-                val node = nodes.getOrPut(key) { p to HashSet() }
-                node.second.add(ri)
-                if (road.name.isNotBlank()) names.getOrPut(key) { HashSet() }.add(road.name)
+    private fun fetchGooglePlaces(f: Fix) {
+        if (!settings.googleReady || googleBusy) return
+        val moved = Geo.distance(googleLat, googleLon, f.lat, f.lon)
+        if (googleLastMs != 0L && moved < 80 && now - googleLastMs < 120_000) return
+        googleBusy = true; googleLastMs = now; googleLat = f.lat; googleLon = f.lon
+        val radius = if (settings.travelMode == TravelMode.DRIVING) 400 else 150
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { google.nearby(f.lat, f.lon, radius) } }
+            googleBusy = false
+            r.onSuccess { list ->
+                googlePlaces = list.map { PlaceCandidate(it.name, it.lat, it.lon, Categories.guess(it.name + " " + it.typeText), false) }
             }
         }
-        junctions = nodes.filter { it.value.second.size >= 2 }.map { (k, v) ->
-            Junction(k, v.first[0], v.first[1], names[k]?.sorted().orEmpty())
-        }
-        junctionCacheKey = islandKey
-        return junctions
-    }
-
-    private fun checkJunction(f: Fix) {
-        if (nav.imminentManeuver()) return
-        val island = islands.nearest(f.lat, f.lon)?.island ?: return
-        val list = buildJunctions(island.key)
-        if (list.isEmpty()) return
-        val driving = settings.travelMode == TravelMode.DRIVING || (f.speedMps ?: 0.0) >= 3.3
-        val maxD = minOf(settings.exploreRadius.toDouble(), if (driving) 140.0 else 70.0)
-        val heading = travelHeading(f)
-        var best: Junction? = null
-        var bestScore = Double.MAX_VALUE
-        var bestDist = 0.0
-        for (j in list) {
-            val d = Geo.distance(f.lat, f.lon, j.lat, j.lon)
-            if (d > maxD || d < 7) continue
-            val diff = Geo.angleBetween(heading, Geo.bearing(f.lat, f.lon, j.lat, j.lon))
-            if (diff > 65) continue
-            val score = d + diff * 0.6
-            if (score < bestScore) { bestScore = score; best = j; bestDist = d }
-        }
-        val j = best ?: return
-        if (j.key == lastJunctionKey && now - lastJunctionMs < 120_000) return
-        val other = j.names.firstOrNull { !it.equals(confirmedRoad, true) }
-        val text = if (other != null) "Intersection with $other ahead, ${Fmt.meters(bestDist)}." else "Intersection ahead, ${Fmt.meters(bestDist)}."
-        if (say(60, text)) { lastJunctionKey = j.key; lastJunctionMs = now }
-    }
-
-    fun placeLine(p: ExplorePlace, index: Int): String {
-        val parts = arrayListOf("$index. ${p.name}", Fmt.meters(p.distance), p.side)
-        val cat = p.categoryText.trim()
-        if (cat.isNotBlank() && cat != "None") parts.add(cat)
-        return parts.joinToString(", ")
     }
 }

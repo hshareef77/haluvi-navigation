@@ -22,10 +22,10 @@ object WhereAmI {
                 runCatching { g.google.nearestPlace(f.lat, f.lon) }.getOrNull() to runCatching { g.google.reverseGeocode(f.lat, f.lon) }.getOrNull()
             }
             if (saved != null && saved.distance <= 25) {
-                parts.add("At ${saved.loc.name}, ${Fmt.meters(saved.distance)}.")
+                parts.add("At ${saved.loc.name}.")
             } else if (place != null && (place.distance ?: 9999.0) <= 300) {
-                val side = Geo.clockPosition(g.compass.heading, Geo.bearing(f.lat, f.lon, place.lat, place.lon))
-                parts.add("Near ${place.name}, ${Fmt.meters(place.distance)} at $side.")
+                val where = Phrases.where(g.compass.heading, Geo.bearing(f.lat, f.lon, place.lat, place.lon))
+                parts.add("Near ${place.name}, ${Phrases.distance(place.distance)} $where.")
             }
             if (geo != null && geo.road.isNotBlank()) parts.add("On ${geo.road}.")
             val island = geo?.island?.takeIf { it.isNotBlank() } ?: islandHit?.island?.fullName
@@ -33,20 +33,14 @@ object WhereAmI {
         }
 
         if (parts.isEmpty()) {
-            val limit = g.settings.nearestLocationDistance.toDouble()
-            if (saved != null && saved.distance <= limit) {
-                val side = Geo.clockPosition(g.compass.heading, saved.bearing)
-                parts.add(if (saved.distance <= 15) "You are at ${saved.loc.name}." else "You are near ${saved.loc.name}, ${Fmt.meters(saved.distance)} at $side.")
+            if (saved != null && saved.distance <= 150) {
+                val where = Phrases.where(g.compass.heading, saved.bearing)
+                parts.add(if (saved.distance <= 15) "At ${saved.loc.name}." else "Near ${saved.loc.name}, ${Phrases.distance(saved.distance)} $where.")
             }
-            if (islandHit != null) parts.add("Island: ${islandHit.island.fullName}.")
+            if (islandHit != null) parts.add("${islandHit.island.fullName}.")
             if (parts.isEmpty()) parts.add("Your GPS position is available, but no place name was found.")
         }
-        if (f.accuracy > 50) parts.add("GPS accuracy is low, about ${Fmt.meters(f.accuracy)}.")
+        if (f.accuracy > 40) parts.add("GPS is weak, about ${Fmt.meters(f.accuracy)}.")
         return parts.joinToString(" ")
-    }
-
-    fun compassText(): String {
-        val h = AppGraph.compass.heading
-        return "Compass: ${Geo.directionName(h)}, ${Geo.degreesInt(h)} degrees"
     }
 }

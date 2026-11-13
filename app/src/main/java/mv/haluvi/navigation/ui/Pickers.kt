@@ -3,24 +3,9 @@ package mv.haluvi.navigation.ui
 import android.view.View
 import mv.haluvi.navigation.AppGraph
 import mv.haluvi.navigation.core.Fmt
-import mv.haluvi.navigation.data.TravelMode
 import mv.haluvi.navigation.data.VibrationPatterns
 
 object Pickers {
-    fun travelMode(host: MainActivity): () -> Screen = {
-        val s = AppGraph.settings
-        ChoiceScreen("Choose travel mode", "Choose Walking or Driving. This changes the Google route type and navigation instructions.",
-            TravelMode.values().map { m ->
-                (m.label + if (s.travelMode == m) " - selected" else "") to {
-                    val changed = s.travelMode != m
-                    s.travelMode = m
-                    if (changed) AppGraph.nav.refreshRoute()
-                    host.say("Travel mode: ${m.label}")
-                    host.back()
-                }
-            })
-    }
-
     /** Generic number picker. */
     fun number(host: MainActivity, title: String, intro: String?, values: List<Int>, current: Int, label: (Int) -> String, set: (Int) -> Unit): () -> Screen = {
         ChoiceScreen(title, intro, values.map { v ->
@@ -46,7 +31,7 @@ class VibrationPatternScreen(
     override fun create(): View {
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title(title)
-        ui.info("Tap a pattern to select it. Long press, or use the TalkBack action Preview, to feel it without selecting.")
+        ui.info("Tap to choose. Long press to feel it.")
         val names = (if (includeContinuous) listOf(VibrationPatterns.CONTINUOUS) else emptyList()) + VibrationPatterns.names
         names.forEach { name ->
             ui.button(name + if (name == current) " - selected" else "",

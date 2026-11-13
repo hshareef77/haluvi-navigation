@@ -45,7 +45,7 @@ object AppGraph {
         google = GoogleMaps { settings.googleApiKey }
         osm = OpenStreetMap()
         nav = NavigationEngine(app, settings, islands, store, location, compass, speaker, haptics, google)
-        explore = ExploreEngine(app, settings, islands, store, location, compass, speaker, google, nav)
+        explore = ExploreEngine(app, settings, islands, store, location, speaker, google, nav)
         compass.onCalibrationNeeded = {
             if (nav.isActive || explore.active) speaker.speak("Compass needs calibration. Move the phone in a figure eight.", flush = false)
         }

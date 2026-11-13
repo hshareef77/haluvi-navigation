@@ -98,26 +98,32 @@ class GoogleMaps(private val keyProvider: () -> String) {
         }
     }
 
-    /** Nearest named place to a point (for "Where am I"). */
-    fun nearestPlace(lat: Double, lon: Double): OnlinePlace? {
+    /** Places around a point, nearest first (Places API (New) searchNearby, legacy fallback). */
+    fun nearby(lat: Double, lon: Double, radius: Int): List<OnlinePlace> {
         val list = try {
-            val body = JSONObject().put("maxResultCount", 10).put("rankPreference", "DISTANCE").put("languageCode", "en")
+            val body = JSONObject().put("maxResultCount", 20).put("rankPreference", "DISTANCE").put("languageCode", "en")
                 .put("locationRestriction", JSONObject().put("circle", JSONObject()
-                    .put("center", JSONObject().put("latitude", lat).put("longitude", lon)).put("radius", 300.0)))
+                    .put("center", JSONObject().put("latitude", lat).put("longitude", lon)).put("radius", radius.coerceIn(20, 50000).toDouble())))
             parsePlacesNew(Http.post("https://places.googleapis.com/v1/places:searchNearby", body.toString(), "application/json",
                 mapOf("X-Goog-Api-Key" to key, "X-Goog-FieldMask" to "places.displayName,places.formattedAddress,places.location,places.types,places.primaryTypeDisplayName")))
         } catch (e: Exception) {
-            val o = JSONObject(Http.get("https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=$lat,$lon&rankby=distance&type=point_of_interest&key=${Http.enc(key)}"))
+            val o = try {
+                JSONObject(Http.get("https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=$lat,$lon&rankby=distance&type=point_of_interest&key=${Http.enc(key)}"))
+            } catch (_: Exception) { throw e }
             checkLegacyStatus(o)
             val arr = o.optJSONArray("results") ?: JSONArray()
             (0 until arr.length()).mapNotNull { i ->
                 val r = arr.getJSONObject(i)
                 val l = r.optJSONObject("geometry")?.optJSONObject("location") ?: return@mapNotNull null
-                OnlinePlace(r.optString("name", "Place"), l.getDouble("lat"), l.getDouble("lng"), r.optString("vicinity"), "", "google")
+                OnlinePlace(r.optString("name", "Place"), l.getDouble("lat"), l.getDouble("lng"), r.optString("vicinity"), typesText(r.optJSONArray("types")), "google")
             }
         }
-        return list.map { it.also { p -> p.distance = Geo.distance(lat, lon, p.lat, p.lon) } }.minByOrNull { it.distance ?: Double.MAX_VALUE }
+        list.forEach { it.distance = Geo.distance(lat, lon, it.lat, it.lon); it.bearing = Geo.bearing(lat, lon, it.lat, it.lon) }
+        return list.filter { (it.distance ?: 0.0) <= radius * 1.2 }.sortedBy { it.distance }
     }
+
+    /** Nearest named place to a point (for "Where am I"). */
+    fun nearestPlace(lat: Double, lon: Double): OnlinePlace? = nearby(lat, lon, 300).firstOrNull()
 
     // ---------------- Geocoding ----------------
 

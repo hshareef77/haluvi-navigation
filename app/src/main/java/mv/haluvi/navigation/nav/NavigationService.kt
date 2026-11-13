@@ -109,7 +109,7 @@ class NavigationService : Service() {
         val explore = AppGraph.explore
         return when {
             nav.isActive -> nav.notificationText().ifBlank { "Navigating" }
-            explore.active -> "Exploring. " + explore.message
+            explore.active -> explore.statusText + (if (explore.roadText.isNotBlank()) " " + explore.roadText else "")
             else -> "Ready"
         }
     }
@@ -139,7 +139,7 @@ class NavigationService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else @Suppress("DEPRECATION") Notification.Builder(this)
         return b.setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(if (AppGraph.nav.isActive) "Navigating to ${AppGraph.nav.target?.name}" else getString(R.string.app_name))
+            .setContentTitle(if (AppGraph.nav.isActive) "Going to ${AppGraph.nav.target?.name}" else getString(R.string.app_name))
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(open)

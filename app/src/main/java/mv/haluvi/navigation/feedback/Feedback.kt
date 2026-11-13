@@ -10,30 +10,51 @@ import android.os.VibratorManager
 import android.speech.tts.TextToSpeech
 import mv.haluvi.navigation.data.Settings
 import mv.haluvi.navigation.data.VibrationPatterns
-import java.util.Locale
 
-/** Text to speech for navigation guidance. Works with the screen off (unlike TalkBack announcements). */
+/**
+ * Text to speech for navigation guidance.
+ *  - Uses the phone's DEFAULT speech engine (the one chosen in Android settings), not Google TTS.
+ *  - Uses the engine's own language and voice (nothing is forced).
+ *  - Plays at ACCESSIBILITY volume, the same volume as the screen reader.
+ * Works with the screen off (unlike screen reader announcements).
+ */
 class Speaker(context: Context, private val settings: Settings) {
+    private val appContext = context.applicationContext
     private var ready = false
     private var pending: String? = null
     private var lastText = ""
     private var lastMs = 0L
+    private lateinit var tts: TextToSpeech
 
-    private val tts: TextToSpeech = TextToSpeech(context.applicationContext) { status ->
-        if (status == TextToSpeech.SUCCESS) {
-            ready = true
-            configure()
-            pending?.let { speakNow(it, true) }
-            pending = null
+    init { connect() }
+
+    private fun defaultEngine(): String? = runCatching {
+        android.provider.Settings.Secure.getString(appContext.contentResolver, android.provider.Settings.Secure.TTS_DEFAULT_SYNTH)
+    }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    /** (Re)connects to the current default engine, e.g. after the user changes it in Android settings. */
+    fun connect() {
+        ready = false
+        if (this::tts.isInitialized) runCatching { tts.shutdown() }
+        val listener = TextToSpeech.OnInitListener { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                ready = true
+                configure()
+                pending?.let { speakNow(it, true) }
+                pending = null
+            }
         }
+        val engine = defaultEngine()
+        tts = if (engine != null) TextToSpeech(appContext, listener, engine) else TextToSpeech(appContext, listener)
     }
 
+    val engineName: String get() = runCatching { tts.defaultEngine }.getOrNull() ?: defaultEngine() ?: "default"
+
     private fun configure() {
-        runCatching { tts.language = Locale.US }
         runCatching {
             tts.setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -45,7 +66,7 @@ class Speaker(context: Context, private val settings: Settings) {
 
     /**
      * Speaks [text]. [flush] interrupts what is being said. Identical text within 1.5 s is dropped so
-     * that fast repeated events do not stutter (the Lua v49 TTS throttle).
+     * that fast repeated events do not stutter.
      */
     fun speak(text: String, flush: Boolean = true, force: Boolean = false) {
         if (!settings.voiceOn && !force) return
@@ -59,10 +80,10 @@ class Speaker(context: Context, private val settings: Settings) {
     }
 
     private fun speakNow(text: String, flush: Boolean) {
-        runCatching { tts.speak(text, if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, "h" + SystemClock.elapsedRealtime()) }
+        val params = android.os.Bundle()
+        params.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, android.media.AudioManager.STREAM_ACCESSIBILITY)
+        runCatching { tts.speak(text, if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, params, "h" + SystemClock.elapsedRealtime()) }
     }
-
-    fun isSpeaking(): Boolean = runCatching { tts.isSpeaking }.getOrDefault(false)
 
     fun stop() { runCatching { tts.stop() } }
 }

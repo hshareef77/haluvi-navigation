@@ -61,7 +61,7 @@ class MainActivity : Activity() {
         setContentView(container)
         AppGraph.nav.addListener(liveListener)
         AppGraph.explore.addListener(liveListener)
-        showTabs(AppGraph.settings.homeTab)
+        showHome()
         requestPermissionsIfNeeded()
     }
 
@@ -113,8 +113,6 @@ class MainActivity : Activity() {
 
     fun back() {
         if (stack.size <= 1) {
-            val tabs = current as? TabsScreen
-            if (tabs != null && tabs.tab != "Home") { showTabs("Home"); return }
             moveTaskToBack(true)
             return
         }
@@ -122,11 +120,33 @@ class MainActivity : Activity() {
         display(stack.last())
     }
 
-    /** Clears the stack and shows the main tabbed screen. */
-    fun showTabs(tab: String) {
-        AppGraph.settings.homeTab = tab
+    /** Goes back to [screen] if it is on the stack. */
+    fun backTo(screen: Screen) {
+        val idx = stack.indexOfLast { it === screen }
+        if (idx < 0) { back(); return }
+        while (stack.size > idx + 1) stack.removeAt(stack.size - 1)
+        display(screen)
+    }
+
+    /** Clears the stack and shows the Home screen. */
+    fun showHome() {
         stack.clear()
-        show { TabsScreen(AppGraph.settings.homeTab) }
+        show { HomeScreen() }
+    }
+
+    /** Clears the stack and opens the navigation screen (after Start). */
+    fun showNavigation() {
+        stack.clear()
+        stack.add(HomeScreen())
+        show { NavigationScreen() }
+    }
+
+    /**
+     * Speaks a result once: with the app voice when Voice is on, otherwise through the screen reader.
+     * Never both, so nothing is spoken twice.
+     */
+    fun speak(text: String) {
+        if (AppGraph.settings.voiceOn) AppGraph.speaker.speak(text) else say(text)
     }
 
     private fun display(screen: Screen, keepFocus: Boolean = false) {
