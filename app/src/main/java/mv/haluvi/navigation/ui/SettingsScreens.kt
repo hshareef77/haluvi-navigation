@@ -49,7 +49,9 @@ class SettingsScreen : Screen() {
             host.show { TextScreen("About", listOf(
                 "Haluvi Navigation ${BuildConfig.VERSION_NAME}.",
                 "Accessible navigation for blind and low vision people in the Maldives.",
-                "Developed by Hussain Shareef."
+                "Developed by Hussain Shareef.",
+                "Map data © OpenStreetMap contributors, available under the Open Database License (openstreetmap.org/copyright).",
+                "Places can also come from Google Maps when you turn it on."
             )) }
         }
         ui.button("Back") { host.back() }

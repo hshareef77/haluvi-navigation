@@ -128,6 +128,32 @@ class GoogleMaps(private val keyProvider: () -> String) {
         return list.filter { (it.distance ?: 0.0) <= radius * 1.2 }.sortedBy { it.distance }
     }
 
+    /**
+     * All places of every kind strictly inside a circle (at most 20, Google's limit per request).
+     * Used to cover a whole island circle by circle; a full answer (20) means there may be more,
+     * so the caller splits that circle into smaller ones.
+     */
+    fun placesInCircle(lat: Double, lon: Double, radius: Double): List<OnlinePlace> {
+        return try {
+            val body = JSONObject().put("maxResultCount", 20).put("rankPreference", "DISTANCE").put("languageCode", "en")
+                .put("locationRestriction", JSONObject().put("circle", JSONObject()
+                    .put("center", JSONObject().put("latitude", lat).put("longitude", lon)).put("radius", radius.coerceIn(10.0, 50000.0))))
+            parsePlacesNew(Http.post("https://places.googleapis.com/v1/places:searchNearby", body.toString(), "application/json",
+                mapOf("X-Goog-Api-Key" to key, "X-Goog-FieldMask" to "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.primaryTypeDisplayName")))
+        } catch (e: Exception) {
+            val o = try {
+                JSONObject(Http.get("https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=$lat,$lon&radius=${radius.toInt().coerceIn(10, 50000)}&key=${Http.enc(key)}"))
+            } catch (_: Exception) { throw e }
+            checkLegacyStatus(o)
+            val arr = o.optJSONArray("results") ?: JSONArray()
+            (0 until arr.length()).mapNotNull { i ->
+                val r = arr.getJSONObject(i)
+                val l = r.optJSONObject("geometry")?.optJSONObject("location") ?: return@mapNotNull null
+                OnlinePlace(r.optString("name", "Place"), l.getDouble("lat"), l.getDouble("lng"), r.optString("vicinity"), typesText(r.optJSONArray("types")), "google", placeId = r.optString("place_id"))
+            }
+        }
+    }
+
     /** Nearest named place to a point (for "Where am I"). */
     fun nearestPlace(lat: Double, lon: Double): OnlinePlace? = nearby(lat, lon, 300).firstOrNull()
 

@@ -21,6 +21,8 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
 - **Explore**: your road, intersections on your road, and places as you pass them. Pauses when GPS is weak.
 - **What's around me**: nearest places with clock positions, by category.
 - **My places**: save, edit, delete, download island map (places and roads), import, export.
+- **Get Google places** (optional): all places Google Maps has on an island, of every kind. The island is
+  covered square by square and busy squares are split until nothing is missed; you choose which to save.
 - Uses your default speech engine at accessibility volume; keeps guiding with the screen off.
 
 ## Moving from the Lua app
@@ -33,5 +35,7 @@ Enable **Places API (New)**, **Routes API** and **Geocoding API** in Google Clou
 
 ## Building
 GitHub Actions builds the APK (`Build Android APK` workflow). Locally: `gradle :app:assembleDebug` with JDK 17 and the Android SDK.
+
+Map data © OpenStreetMap contributors (ODbL, openstreetmap.org/copyright).
 
 Developed by Hussain Shareef.

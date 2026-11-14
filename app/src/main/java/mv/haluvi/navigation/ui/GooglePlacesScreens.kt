@@ -27,13 +27,89 @@ object GooglePick {
     var progress = ""
     var lastMessage = ""
     val running: Boolean get() = job?.isActive == true
+}
 
-    /** One Google search per category and island. */
-    val categories = listOf(
-        "mosque" to "mosques", "health" to "hospitals, health centres, clinics and pharmacies", "shop" to "shops and supermarkets",
-        "food" to "restaurants and cafes", "ferry" to "ferry terminals, harbours and jetties", "school" to "schools",
-        "bank" to "banks and ATMs", "hotel" to "hotels and guest houses", "police" to "police stations and council offices"
-    )
+/**
+ * Finds all Google places on an island by covering its outline with squares and asking Google for the
+ * places inside each square's circle (every kind of place, strictly inside the circle). Google answers at
+ * most 20 places per request, so a full answer means there may be more: that square is split into 4
+ * smaller ones and searched again, until every part of the island has fewer than 20 places.
+ */
+object GoogleIslandSearch {
+    private const val START_SIDE = 500.0   // metres
+    private const val MIN_SIDE = 40.0
+    const val MAX_REQUESTS_PER_ISLAND = 400
+
+    data class Square(val lat: Double, val lon: Double, val side: Double) {
+        val radius: Double get() = side * 0.7072 + 5
+        fun split(): List<Square> {
+            val q = side / 4
+            val dLat = q / 111320.0
+            val dLon = q / (111320.0 * Math.cos(Math.toRadians(lat)))
+            return listOf(Square(lat + dLat, lon - dLon, side / 2), Square(lat + dLat, lon + dLon, side / 2),
+                Square(lat - dLat, lon - dLon, side / 2), Square(lat - dLat, lon + dLon, side / 2))
+        }
+    }
+
+    private fun touches(isl: Island, sq: Square): Boolean = AppGraph.shapes.shoreDistance(isl, sq.lat, sq.lon) <= sq.radius
+
+    /** The starting squares (500 m) that touch the island. */
+    fun startSquares(isl: Island): List<Square> {
+        val ring = AppGraph.shapes.ring(isl.key)
+        val cos = Math.cos(Math.toRadians(isl.lat))
+        val minLat: Double; val maxLat: Double; val minLon: Double; val maxLon: Double
+        if (ring != null && ring.size >= 3) {
+            minLat = ring.minOf { it.lat }; maxLat = ring.maxOf { it.lat }; minLon = ring.minOf { it.lon }; maxLon = ring.maxOf { it.lon }
+        } else {
+            val dl = 800 / 111320.0; val dn = 800 / (111320.0 * cos)
+            minLat = isl.lat - dl; maxLat = isl.lat + dl; minLon = isl.lon - dn; maxLon = isl.lon + dn
+        }
+        val h = (maxLat - minLat) * 111320.0
+        val w = (maxLon - minLon) * 111320.0 * cos
+        val ny = Math.max(1, Math.ceil(h / START_SIDE).toInt())
+        val nx = Math.max(1, Math.ceil(w / START_SIDE).toInt())
+        val cLat = (minLat + maxLat) / 2; val cLon = (minLon + maxLon) / 2
+        val out = ArrayList<Square>()
+        for (iy in 0 until ny) for (ix in 0 until nx) {
+            val lat = cLat + ((iy - (ny - 1) / 2.0) * START_SIDE) / 111320.0
+            val lon = cLon + ((ix - (nx - 1) / 2.0) * START_SIDE) / (111320.0 * cos)
+            val sq = Square(lat, lon, START_SIDE)
+            if (touches(isl, sq)) out.add(sq)
+        }
+        if (out.isEmpty()) out.add(Square(isl.lat, isl.lon, START_SIDE))
+        return out
+    }
+
+    class Result(val found: List<GoogleFind>, val alreadySaved: Int, val requests: Int, val failed: Int, val limitReached: Boolean)
+
+    /** Searches one island. [onStep] gets the number of requests made so far. Runs network calls on IO. */
+    suspend fun search(isl: Island, onStep: (requests: Int, found: Int) -> Unit): Result {
+        val g = AppGraph
+        val queue = ArrayDeque(startSquares(isl))
+        val found = LinkedHashMap<String, GoogleFind>()
+        val saved = HashSet<String>()
+        var requests = 0; var failed = 0; var limit = false
+        while (queue.isNotEmpty()) {
+            if (requests >= MAX_REQUESTS_PER_ISLAND) { limit = true; break }
+            val sq = queue.removeFirst()
+            requests++
+            onStep(requests, found.size)
+            val r = withContext(Dispatchers.IO) { runCatching { g.google.placesInCircle(sq.lat, sq.lon, sq.radius) } }
+            val list = r.getOrNull()
+            if (list == null) { failed++; continue }
+            if (list.size >= 20 && sq.side / 2 >= MIN_SIDE) {
+                sq.split().filter { touches(isl, it) }.forEach { queue.addLast(it) }
+            }
+            for (p in list) {
+                // Keep only places on this island (inside its outline, or at its shore such as jetties).
+                if (g.shapes.shoreDistance(isl, p.lat, p.lon) > 100) continue
+                val f = GoogleFind(p, Categories.guess(p.typeText + " " + p.name), isl)
+                if (g.store.findDuplicate(p.name, p.lat, p.lon) != null) { saved.add(f.key); continue }
+                found.putIfAbsent(f.key, f)
+            }
+        }
+        return Result(found.values.sortedBy { it.place.name.lowercase() }, saved.size, requests, failed, limit)
+    }
 }
 
 /**
@@ -64,26 +140,19 @@ class GooglePlacesScreen : Screen() {
             return scroll
         }
         progressView = null
-        ui.info("Finds places on Google Maps for an island. You choose which ones to save. Saved places work offline for routing, Explore and What's around me.")
+        ui.info("Finds all places Google Maps has on an island, of every kind. The island is searched part by part; busy parts are searched more closely. You choose which places to save. Saved places work offline for routing, Explore and What's around me.")
         if (GooglePick.lastMessage.isNotBlank()) ui.info(GooglePick.lastMessage)
         if (GooglePick.results.isNotEmpty()) ui.button("Show last results: ${GooglePick.results.size}") { host.show { GooglePickResultsScreen() } }
         val mine = OfflineMaps.myIsland()
-        if (mine != null) ui.button("My island: ${mine.name}", color = UiColors.BUTTON_ON) { start(listOf(mine), mine.name) }
+        if (mine != null) ui.button("My island: ${mine.name}", color = UiColors.BUTTON_ON) { confirm(listOf(mine), mine.name) }
         else ui.info("My island: waiting for GPS.")
         ui.button("Choose island") {
-            host.show { AtollPickerScreen { isl -> host.backTo(this@GooglePlacesScreen); if (isl.atollIndex >= 0) start(listOf(isl), isl.name) else host.speak("Choose an inhabited island.") } }
+            host.show { AtollPickerScreen { isl -> host.backTo(this@GooglePlacesScreen); if (isl.atollIndex >= 0) confirm(listOf(isl), isl.name) else host.speak("Choose an inhabited island.") } }
         }
         ui.button("Choose atoll") {
             host.show {
                 ChoiceScreen("Choose atoll", null, g.islands.atolls.map { a ->
-                    "${a.fullName}, ${a.islands.size} islands" to {
-                        val n = a.islands.size * GooglePick.categories.size
-                        host.show {
-                            ConfirmScreen("Search ${a.fullName}: about $n Google searches. This may use part of your Google free monthly amount or cost money. Continue?", "Search") {
-                                host.backTo(this@GooglePlacesScreen); start(a.islands, a.fullName)
-                            }
-                        }
-                    }
+                    "${a.fullName}, ${a.islands.size} islands" to { confirm(a.islands, a.fullName) }
                 })
             }
         }
@@ -91,41 +160,46 @@ class GooglePlacesScreen : Screen() {
         return scroll
     }
 
+    /** Shows how many Google searches are needed, then starts. */
+    private fun confirm(islands: List<Island>, label: String) {
+        val n = islands.sumOf { GoogleIslandSearch.startSquares(it).size }
+        host.show {
+            ConfirmScreen("Search $label: at least $n Google searches; busy areas need more (Male' can need 100 to 200). " +
+                "This uses part of your Google free monthly amount, or may cost money. Continue?", "Search") {
+                host.backTo(this@GooglePlacesScreen); start(islands, label)
+            }
+        }
+    }
+
     private fun start(islands: List<Island>, label: String) {
-        val g = AppGraph
         GooglePick.results = emptyList(); GooglePick.selected.clear()
         GooglePick.progress = "Searching Google for $label."
         host.speak("Searching Google places for $label.")
         GooglePick.job = host.scope.launch {
-            val found = LinkedHashMap<String, GoogleFind>()
-            var failed = 0
+            val all = LinkedHashMap<String, GoogleFind>()
+            var saved = 0; var requests = 0; var failed = 0; var limited = 0
             val msg = try {
                 for ((ii, isl) in islands.withIndex()) {
-                    for ((ci, cat) in GooglePick.categories.withIndex()) {
-                        val step = "${if (islands.size > 1) "Island ${ii + 1} of ${islands.size}, " else ""}${isl.name}: ${cat.second} (${ci + 1} of ${GooglePick.categories.size}). ${found.size} places so far."
+                    val r = GoogleIslandSearch.search(isl) { n, f ->
+                        val step = "${if (islands.size > 1) "Island ${ii + 1} of ${islands.size}, " else ""}${isl.name}: search ${n}. ${all.size + f} places so far."
                         GooglePick.progress = step
                         progressView?.takeIf { host.currentScreen() === this@GooglePlacesScreen }?.text = step
-                        val radius = (g.shapes.ring(isl.key)?.let { mv.haluvi.navigation.data.IslandShapes.radius(it) * 1.5 } ?: 1500.0).toInt().coerceIn(300, 5000)
-                        val r = withContext(Dispatchers.IO) {
-                            runCatching { g.google.searchText("${cat.second} in ${isl.name}, ${isl.atollFullName}, Maldives", isl.lat, isl.lon, radius) }
-                        }
-                        r.onSuccess { list ->
-                            for (p in list) {
-                                // Keep only places on this island (inside its outline, or at its shore).
-                                if (g.shapes.shoreDistance(isl, p.lat, p.lon) > 150) continue
-                                if (g.store.findDuplicate(p.name, p.lat, p.lon) != null) continue
-                                val f = GoogleFind(p, cat.first.takeIf { it != "police" } ?: Categories.guess(p.name + " " + p.typeText).let { if (it == "other") "police" else it }, isl)
-                                found.putIfAbsent(f.key, f)
-                            }
-                        }.onFailure { failed++ }
                     }
+                    r.found.forEach { all.putIfAbsent(it.key, it) }
+                    saved += r.alreadySaved; requests += r.requests; failed += r.failed
+                    if (r.limitReached) limited++
                 }
-                GooglePick.results = found.values.toList()
-                "${found.size} new Google places found for $label." + (if (failed > 0) " $failed searches failed." else "") +
-                    if (found.isEmpty()) "" else " Select the ones to save."
+                GooglePick.results = all.values.toList()
+                buildString {
+                    append("${all.size} new Google places found for $label, with $requests searches.")
+                    if (saved > 0) append(" $saved more are already in My places.")
+                    if (failed > 0) append(" $failed searches failed; search again later to fill gaps.")
+                    if (limited > 0) append(" Search limit reached on $limited islands; some places may be missing.")
+                    if (all.isNotEmpty()) append(" Select the ones to save.")
+                }
             } catch (e: CancellationException) {
-                GooglePick.results = found.values.toList()
-                "Stopped. ${found.size} places found so far."
+                GooglePick.results = all.values.toList()
+                "Stopped. ${all.size} places found so far."
             }
             GooglePick.lastMessage = msg
             host.speak(msg)
