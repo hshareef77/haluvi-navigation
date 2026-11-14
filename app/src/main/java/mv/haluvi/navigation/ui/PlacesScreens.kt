@@ -38,7 +38,7 @@ class MyPlacesScreen(
         firstChoice?.let { (label, action) -> ui.button(label) { action() } }
         if (!forGoTo) {
             ui.button("Save this place") { host.show { SavePlaceScreen() } }
-            ui.button("Download island map") { host.show { MapDataScreen() } }
+            ui.button("Offline maps") { host.show { OfflineMapsScreen() } }
         }
         val edit = ui.edit("Find in my places", query) { query = it.trim(); limit = 40; rebuild() }
         ui.row("Find" to { query = edit.text.toString().trim(); limit = 40; rebuild() }, "Clear" to { query = ""; rebuild() })
@@ -279,7 +279,8 @@ class AtollPickerScreen(private val onPick: (Island) -> Unit) : Screen() {
             if (found.isEmpty()) ui.info("Nothing found.")
             found.forEach { isl -> ui.button(islandLabel(isl)) { onPick(isl) } }
         }
-        if (g.shapes.extras.isNotEmpty()) ui.button("Resorts, airports and other islands nearby") { host.show { OtherIslandsScreen(onPick) } }
+        ui.button("Airports") { host.show { AirportsScreen(onPick) } }
+        if (g.shapes.extras.isNotEmpty()) ui.button("Resorts and other islands nearby") { host.show { OtherIslandsScreen(onPick) } }
         g.islands.atolls.forEach { a -> ui.button(a.fullName) { host.show { IslandPickerScreen(a, onPick) } } }
         ui.button("Back") { host.back() }
         return scroll
@@ -319,86 +320,5 @@ class IslandPickerScreen(private val atoll: Atoll, private val onPick: (Island) 
         }
         ui.button("Back") { host.back() }
         return scroll
-    }
-}
-
-/** Downloads places and roads of one island from OpenStreetMap for offline use. */
-class MapDataScreen : Screen() {
-    private var job: Job? = null
-    private var progressView: TextView? = null
-    private var progress = ""
-
-    private fun island(): Island? = AppGraph.islands.byKey(AppGraph.settings.mapDataIslandKey) ?: AppGraph.nav.currentIsland()
-
-    override fun create(): View {
-        val g = AppGraph
-        val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title("Island map")
-        val isl = island()
-        if (job?.isActive == true) {
-            progressView = ui.info(progress)
-            ui.button("Cancel download", color = UiColors.BUTTON_STOP) { job?.cancel(); progress = "Download cancelled."; rebuild() }
-            return scroll
-        }
-        progressView = null
-        ui.button("Island: " + (isl?.fullName ?: "waiting for GPS")) {
-            host.show { AtollPickerScreen { picked -> g.settings.mapDataIslandKey = picked.key; host.backTo(this@MapDataScreen) } }
-        }
-        if (isl != null) {
-            ui.info("${g.store.countDownloadedForIsland(isl.key)} places and ${g.store.roadCount(isl.key)} roads downloaded.")
-            if (progress.isNotBlank()) ui.info(progress)
-            ui.button("Download", color = UiColors.BUTTON_ON) { download(isl) }
-            ui.button("Delete downloaded map", color = UiColors.BUTTON_STOP) {
-                host.show { ConfirmScreen("Delete the downloaded map of ${isl.name}? Places you saved yourself are kept.", "Delete") {
-                    val n = g.store.deleteDownloadedForIsland(isl.key)
-                    host.speak("$n places deleted.")
-                    host.back()
-                } }
-            }
-        }
-        ui.button("Back") { host.back() }
-        return scroll
-    }
-
-    private fun setProgress(text: String) { progress = text; progressView?.text = text }
-
-    private fun download(island: Island) {
-        val g = AppGraph
-        val cats = g.osm.mapCategories
-        val total = cats.size + 1
-        progress = "Starting."
-        host.speak("Downloading map of ${island.name}.")
-        job = host.scope.launch {
-            var added = 0; var failed = 0
-            for ((i, cat) in cats.withIndex()) {
-                if (!isActive) return@launch
-                setProgress("Step ${i + 1} of $total. $added places so far.")
-                val r = withContext(Dispatchers.IO) { runCatching { g.osm.islandPlaces(cat.key, island.lat, island.lon, 4000) } }
-                r.onSuccess { list ->
-                    list.forEach { p ->
-                        if (g.islands.nearest(p.lat, p.lon)?.island?.key != island.key) return@forEach
-                        val catId = if (cat.key == "common") Categories.guess(p.name + " " + p.typeText) else cat.key
-                        val loc = SavedLocation(SavedLocation.newId(), p.name, p.lat, p.lon, 0.0, source = SavedLocation.SOURCE_OSM_MAP,
-                            categoryId = catId, islandKey = island.key, islandName = island.fullName, address = p.address)
-                        if (g.store.add(loc, persist = false)) added++
-                    }
-                    g.store.save()
-                }.onFailure { failed++ }
-            }
-            if (!isActive) return@launch
-            setProgress("Step $total of $total: roads.")
-            var roadCount = -1
-            withContext(Dispatchers.IO) { runCatching { g.osm.islandRoads(island.lat, island.lon, 4000) } }.onSuccess { list ->
-                val onIsland = list.filter { r -> r.points.any { p -> g.islands.nearest(p[0], p[1])?.island?.key == island.key } }
-                withContext(Dispatchers.IO) { g.store.saveRoads(island.key, onIsland) }
-                roadCount = onIsland.size
-            }.onFailure { failed++ }
-            val msg = "Done. $added new places" + (if (roadCount >= 0) " and $roadCount roads." else ".") +
-                (if (failed > 0) " Some parts failed. Press Download again to retry." else "")
-            progress = msg
-            host.speak(msg)
-            if (host.currentScreen() === this@MapDataScreen) rebuild()
-        }
-        rebuild()
     }
 }

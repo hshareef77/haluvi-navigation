@@ -9,15 +9,20 @@ data class Atoll(val index: Int, val name: String, val code: String, val fullNam
 }
 
 data class Island(val atollIndex: Int, val index: Int, val name: String, var lat: Double, var lon: Double) {
-    /** "inhabited", "resort", "airport" or "island" (uninhabited). */
+    /**
+     * "inhabited" (only the official island list), "resort", "airport" or "island" (uninhabited).
+     */
     var type: String = "inhabited"
 
-    /** Name with its kind for announcements: "Kandooma, resort". Inhabited islands are said by name only. */
+    /** An inhabited island that also has an airport (e.g. Hanimaadhoo). */
+    var hasAirport: Boolean = false
+
+    /** Name with its kind for announcements: "Kandooma, resort", "Hanimaadhoo, with airport". */
     val spokenName: String get() = when (type) {
         "resort" -> "$name, resort"
         "airport" -> "$name, airport"
         "island" -> "$name, uninhabited island"
-        else -> name
+        else -> if (hasAirport) "$name, with airport" else name
     }
 
     /** Stable key, independent of list order: "HA:Dhidhoo". */

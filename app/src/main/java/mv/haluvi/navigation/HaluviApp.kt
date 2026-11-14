@@ -41,7 +41,10 @@ object AppGraph {
     /** True while the app's screen is visible (notifications are then not needed). */
     @Volatile var uiVisible = false
 
+    lateinit var appContext: android.content.Context; private set
+
     fun init(app: Application) {
+        appContext = app
         settings = Settings(app)
         islands = IslandRepository(app)
         shapes = IslandShapes(app, islands)

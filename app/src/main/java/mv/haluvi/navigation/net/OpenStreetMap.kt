@@ -282,9 +282,10 @@ class OpenStreetMap {
 
         return unique.map { (nm, ring) ->
             val inside = points.filter { pointInRingSimple(it.lat, it.lon, ring) }
-            // People live there -> inhabited, even with an airport (Hulhumalé, Gan, Hanimaadhoo).
+            // "Inhabited" is decided only by the app's official island list, never by map guesses.
+            // Here: airport (Gan), resort, or uninhabited island. An inhabited island matched to an
+            // "airport" outline is an inhabited island with an airport (Hanimaadhoo).
             val type = when {
-                inside.any { it.kind == "inhabited" } -> "inhabited"
                 inside.any { it.kind == "airport" } -> "airport"
                 inside.any { it.kind == "resort" } -> "resort"
                 else -> "island"
@@ -354,5 +355,73 @@ class OpenStreetMap {
             if (ring.size >= 4 && key(ring.first()) == key(ring.last())) rings.add(ring)
         }
         return rings
+    }
+
+    /** A place from the map with its category (mosque, shop, health, ...). */
+    data class MapPlace(val name: String, val lat: Double, val lon: Double, val categoryId: String, val typeText: String, val address: String)
+
+    /** All named places inside a box, in one request (used by Offline maps for an atoll or island). */
+    fun placesInBox(south: Double, west: Double, north: Double, east: Double): List<MapPlace> {
+        val b = "($south,$west,$north,$east)"
+        val f = listOf(
+            "[\"amenity\"]", "[\"shop\"]", "[\"tourism\"]", "[\"healthcare\"]", "[\"leisure\"][\"name\"]",
+            "[\"office\"][\"name\"]", "[\"man_made\"=\"pier\"]", "[\"public_transport\"]", "[\"building\"=\"mosque\"]", "[\"craft\"][\"name\"]"
+        )
+        val q = "[out:json][timeout:180];(" + f.joinToString("") { "node$b$it;way$b$it;" } + ");out center tags;"
+        val arr = JSONObject(overpass(q)).optJSONArray("elements") ?: return emptyList()
+        val out = ArrayList<MapPlace>()
+        val seen = HashSet<String>()
+        for (i in 0 until arr.length()) {
+            val e = arr.getJSONObject(i)
+            val t = e.optJSONObject("tags") ?: continue
+            val lat = if (e.has("lat")) e.optDouble("lat") else e.optJSONObject("center")?.optDouble("lat") ?: continue
+            val lon = if (e.has("lon")) e.optDouble("lon") else e.optJSONObject("center")?.optDouble("lon") ?: continue
+            val cat = categoryFromTags(t)
+            val type = tagType(t)
+            var name = t.optString("name:en").ifBlank { t.optString("name") }
+            // Unnamed places are kept only when useful for blind travellers (toilets, ATM, bus stop, pier ...).
+            if (name.isBlank()) {
+                if (type in setOf("toilets", "atm", "bus stop", "pier", "ferry terminal", "pharmacy", "drinking water", "bench")) name = type.replaceFirstChar { it.uppercase() }
+                else continue
+            }
+            if (type == "parking" || type == "waste basket" || type == "bench" && t.optString("name").isBlank()) continue
+            val addr = listOf(t.optString("addr:street"), t.optString("addr:housename")).filter { it.isNotBlank() }.joinToString(", ")
+            val key = name.lowercase() + String.format(java.util.Locale.US, "%.5f%.5f", lat, lon)
+            if (seen.add(key)) out.add(MapPlace(name, lat, lon, cat, type, addr))
+        }
+        return out
+    }
+
+    private fun categoryFromTags(t: JSONObject): String {
+        val amenity = t.optString("amenity"); val shop = t.optString("shop"); val tourism = t.optString("tourism")
+        return when {
+            (amenity == "place_of_worship" && t.optString("religion") == "muslim") || t.optString("building") == "mosque" -> "mosque"
+            amenity in setOf("hospital", "clinic", "doctors", "pharmacy", "dentist") || t.has("healthcare") -> "health"
+            amenity in setOf("school", "college", "kindergarten", "university") -> "school"
+            shop.isNotBlank() || amenity == "marketplace" -> "shop"
+            amenity in setOf("restaurant", "cafe", "fast_food", "food_court") -> "food"
+            amenity == "ferry_terminal" || t.optString("man_made") == "pier" || t.has("harbour") || t.has("public_transport") -> "ferry"
+            amenity in setOf("bank", "atm", "bureau_de_change") -> "bank"
+            amenity == "police" -> "police"
+            tourism in setOf("hotel", "guest_house", "apartment", "hostel", "resort") -> "hotel"
+            else -> "other"
+        }
+    }
+
+    /** All roads and paths inside a box (with geometry), for offline road names, intersections and routing. */
+    fun roadsInBox(south: Double, west: Double, north: Double, east: Double): List<DownloadedRoad> {
+        val q = "[out:json][timeout:180];way($south,$west,$north,$east)[\"highway\"~\"^(primary|secondary|tertiary|unclassified|residential|living_street|service|pedestrian|footway|path|track|road|steps|cycleway)$\"];out geom tags;"
+        val arr = JSONObject(overpass(q)).optJSONArray("elements") ?: return emptyList()
+        val out = ArrayList<DownloadedRoad>()
+        for (i in 0 until arr.length()) {
+            val e = arr.getJSONObject(i)
+            val geom = e.optJSONArray("geometry") ?: continue
+            val pts = (0 until geom.length()).map { j -> val g = geom.getJSONObject(j); doubleArrayOf(g.getDouble("lat"), g.getDouble("lon")) }
+            if (pts.size < 2) continue
+            val tags = e.optJSONObject("tags")
+            val name = tags?.optString("name:en").orEmpty().ifBlank { tags?.optString("name").orEmpty() }.ifBlank { tags?.optString("ref").orEmpty() }
+            out.add(DownloadedRoad(name, pts, tags?.optString("highway").orEmpty(), tags?.optString("oneway") == "yes"))
+        }
+        return out
     }
 }

@@ -99,7 +99,8 @@ data class SavedLocation(
 
 data class PlaceHit(val loc: SavedLocation, val distance: Double, val bearing: Double)
 
-data class DownloadedRoad(val name: String, val points: List<DoubleArray>)
+/** A road or path from the map. [kind] is the OpenStreetMap highway type (residential, footway, ...). */
+data class DownloadedRoad(val name: String, val points: List<DoubleArray>, val kind: String = "", val oneway: Boolean = false)
 
 /**
  * Saved places (manual extra locations, downloaded OpenStreetMap places, saved online results)
@@ -206,7 +207,7 @@ class LocationStore(private val context: Context, private val islands: IslandRep
         roads.forEach { r ->
             val pts = JSONArray()
             r.points.forEach { p -> pts.put(JSONArray().put(p[0]).put(p[1])) }
-            arr.put(JSONObject().put("name", r.name).put("points", pts))
+            arr.put(JSONObject().put("name", r.name).put("points", pts).put("kind", r.kind).put("oneway", r.oneway))
         }
         File(roadsDir, safeName(islandKey) + ".json").writeText(arr.toString())
     }
@@ -221,7 +222,7 @@ class LocationStore(private val context: Context, private val islands: IslandRep
                 val pts = o.getJSONArray("points")
                 DownloadedRoad(o.optString("name"), (0 until pts.length()).map { j ->
                     val p = pts.getJSONArray(j); doubleArrayOf(p.getDouble(0), p.getDouble(1))
-                })
+                }, o.optString("kind"), o.optBoolean("oneway"))
             }
         }.getOrDefault(emptyList())
     }

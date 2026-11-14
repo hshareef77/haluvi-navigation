@@ -53,30 +53,33 @@ object IslandShapeDownloader {
         val failed = ArrayList<String>()
         try {
             // Outlines from version 2.3 or older were matched with older rules: download them all again.
-            if (full || g.shapes.formatVersion in 1..3) g.shapes.clear()
+            if (full || g.shapes.formatVersion in 1..4) g.shapes.clear()
             val todo = g.islands.atolls.filter { a -> a.code !in g.shapes.atollsDone || a.islands.any { !g.shapes.has(it.key) && it.key !in g.shapes.notOnMap } }
             if (todo.isEmpty()) onProgress("Everything is already downloaded.")
             for ((i, atoll) in todo.withIndex()) {
                 currentCoroutineContext().ensureActive()
-                var ok = false
-                for (attempt in 1..3) {
-                    onProgress("Atoll ${i + 1} of ${todo.size}: ${atoll.fullName}" + if (attempt > 1) ", try $attempt." else ".")
-                    val r = withContext(Dispatchers.IO) { runCatching { matchAtoll(atoll) } }
-                    val m = r.getOrNull()
-                    if (m != null) {
-                        g.shapes.putAtoll(m)
-                        onProgress("${atoll.fullName}: ${m.islandRing.size} of ${atoll.islands.size} islands found.")
-                        ok = true
-                        break
-                    }
-                    delay(4000L * attempt)
-                }
-                if (!ok) failed.add(atoll.fullName)
+                if (!ensureAtoll(atoll, "Atoll ${i + 1} of ${todo.size}: ", onProgress)) failed.add(atoll.fullName)
             }
         } finally {
             running = false
         }
         return summary().copy(failedAtolls = failed.ifEmpty { summary().failedAtolls })
+    }
+
+    /** Downloads and matches one atoll's outlines (tries up to 3 times). Returns false if it failed. */
+    suspend fun ensureAtoll(atoll: Atoll, prefix: String, onProgress: (String) -> Unit): Boolean {
+        val g = AppGraph
+        for (attempt in 1..3) {
+            onProgress(prefix + "${atoll.fullName} island outlines" + if (attempt > 1) ", try $attempt." else ".")
+            val m = withContext(Dispatchers.IO) { runCatching { matchAtoll(atoll) } }.getOrNull()
+            if (m != null) {
+                g.shapes.putAtoll(m)
+                onProgress("${atoll.fullName}: ${m.islandRing.size} of ${atoll.islands.size} islands found.")
+                return true
+            }
+            delay(4000L * attempt)
+        }
+        return false
     }
 
     /**
@@ -181,8 +184,11 @@ object IslandShapeDownloader {
 
         // Other named islands (resorts, airports, uninhabited) - not the same land as an inhabited island.
         val usedRings = usedBy.keys.map { outlines[it].ring }
+        val allInhabited = g.islands.allIslands.map { g.shapes.originalPosition(it.key) ?: LatLon(it.lat, it.lon) }
         fun sameLand(r: List<LatLon>): Boolean {
             val c = IslandShapes.centroid(r)
+            // Any inhabited island anywhere (neighbouring atolls too) inside this outline -> not an "other island".
+            if (allInhabited.any { IslandShapes.pointInRing(it.lat, it.lon, r) }) return true
             return usedRings.any { u ->
                 IslandShapes.pointInRing(c.lat, c.lon, u) ||
                     IslandShapes.centroid(u).let { cu -> IslandShapes.pointInRing(cu.lat, cu.lon, r) && IslandShapes.area(r) <= IslandShapes.area(u) * 1.6 }
@@ -201,7 +207,8 @@ object IslandShapeDownloader {
         }
         val others = kept.map { Triple(it.name, it.type, IslandShapes.simplify(it.ring, 8.0)) }
 
-        return IslandShapes.AtollData(atoll.code, atoll.islands.map { it.key }.toSet(), rings, islandRing, names, methods, corrected, warnings, missing, others)
+        val airports = usedBy.filter { (idx, _) -> outlines[idx].type == "airport" }.values.flatten().toSet()
+        return IslandShapes.AtollData(atoll.code, atoll.islands.map { it.key }.toSet(), rings, islandRing, names, methods, corrected, warnings, missing, others, airports)
     }
 
     /** Plain-text report of every inhabited island's outline, for checking accuracy. */

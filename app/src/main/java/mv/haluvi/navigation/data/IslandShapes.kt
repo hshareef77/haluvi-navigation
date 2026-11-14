@@ -31,6 +31,8 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
     @Volatile private var warnings: Map<String, String> = emptyMap()
     @Volatile var atollsDone: Set<String> = emptySet(); private set
     @Volatile var notOnMap: Set<String> = emptySet(); private set
+    /** Inhabited islands that also have an airport (e.g. Hanimaadhoo). */
+    @Volatile var airportIslands: Set<String> = emptySet(); private set
     /** File format: 4 = matched with the 2.5 rules. Older downloads are done again. */
     @Volatile var formatVersion: Int = 0; private set
 
@@ -76,7 +78,9 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
                 for (i in 0 until arr.length()) {
                     val e = arr.getJSONObject(i)
                     val key = e.getString("key")
-                    ex.add(extraIsland(key, e.getString("name"), e.getDouble("lat"), e.getDouble("lon"), e.optString("type", "island")))
+                    // "Inhabited" comes only from the official list; older files could mark extras as inhabited.
+                    val t = e.optString("type", "island").let { if (it == "inhabited") "island" else it }
+                    ex.add(extraIsland(key, e.getString("name"), e.getDouble("lat"), e.getDouble("lon"), t))
                     if (!ir.containsKey(key) && r.containsKey(key)) ir[key] = key
                 }
             }
@@ -89,8 +93,36 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
             corrected = c; correctedBy = cb
             atollsDone = jsonSet(o.optJSONArray("atollsDone"))
             notOnMap = jsonSet(o.optJSONArray("notOnMap"))
+            airportIslands = jsonSet(o.optJSONArray("airportIslands"))
         }
+        removeDuplicateExtras()
     }
+
+    /**
+     * Removes "other islands" that are really an inhabited island (same land). Downloads of one atoll
+     * also see the neighbouring atoll, so this compares against ALL inhabited islands.
+     */
+    @Synchronized
+    private fun removeDuplicateExtras() {
+        if (extras.isEmpty()) return
+        val inhabitedRings = islands.allIslands.mapNotNull { ring(it.key) }.distinct()
+        val keep = extras.filter { e ->
+            val r = rings[e.key] ?: return@filter true
+            val c = centroid(r)
+            val sameLand = inhabitedRings.any { u -> pointInRing(c.lat, c.lon, u) || centroid(u).let { cu -> pointInRing(cu.lat, cu.lon, r) } } ||
+                islands.allIslands.any { pointInRing(it.lat, it.lon, r) }
+            !sameLand
+        }
+        if (keep.size == extras.size) return
+        val removed = extras.filter { e -> keep.none { it.key == e.key } }.map { it.key }.toSet()
+        val r2 = HashMap(rings); val ir2 = HashMap(islandRing)
+        removed.forEach { r2.remove(it); ir2.remove(it) }
+        rings = r2; islandRing = ir2; extras = keep
+        if (file.exists() && formatVersion >= 3) runCatching { save() }
+    }
+
+    /** All airport islands: other islands typed airport, and inhabited islands with an airport. */
+    fun airports(): List<Island> = extras.filter { it.type == "airport" } + islands.allIslands.filter { it.hasAirport }
 
     private fun readRing(arr: JSONArray): List<LatLon> = (0 until arr.length()).map { i -> val p = arr.getJSONArray(i); LatLon(p.getDouble(0), p.getDouble(1)) }
     private fun readMap(o: JSONObject?): Map<String, String> { val m = HashMap<String, String>(); o?.keys()?.forEach { k -> m[k] = o.getString(k) }; return m }
@@ -103,6 +135,7 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
     /** Moves islands with a corrected position to the middle of their real outline. */
     private fun applyCorrections() {
         for (isl in islands.allIslands) {
+            isl.hasAirport = isl.key in airportIslands
             val c = corrected[isl.key] ?: original[isl.key] ?: continue
             isl.lat = c.lat; isl.lon = c.lon
         }
@@ -121,7 +154,9 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
         val warnings: Map<String, String>,
         val missing: Set<String>,
         /** Other named islands: name, type, ring. */
-        val others: List<Triple<String, String, List<LatLon>>>
+        val others: List<Triple<String, String, List<LatLon>>>,
+        /** Inhabited islands of the atoll that have an airport. */
+        val airportIslands: Set<String> = emptySet()
     )
 
     @Synchronized
@@ -147,8 +182,10 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
         rings = r; islandRing = ir; osmNames = names; methods = meth; warnings = warn; corrected = c; correctedBy = cb; extras = ex
         atollsDone = atollsDone + d.code
         notOnMap = (notOnMap - d.islandKeys) + d.missing
-        formatVersion = 4
+        airportIslands = (airportIslands - d.islandKeys) + d.airportIslands
+        formatVersion = 5
         applyCorrections()
+        removeDuplicateExtras()
         save()
     }
 
@@ -156,14 +193,14 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
     @Synchronized
     fun clear() {
         rings = emptyMap(); islandRing = emptyMap(); extras = emptyList(); osmNames = emptyMap(); methods = emptyMap()
-        corrected = emptyMap(); correctedBy = emptyMap(); warnings = emptyMap(); atollsDone = emptySet(); notOnMap = emptySet()
+        corrected = emptyMap(); correctedBy = emptyMap(); warnings = emptyMap(); atollsDone = emptySet(); notOnMap = emptySet(); airportIslands = emptySet()
         formatVersion = 0
         applyCorrections()
         file.delete()
     }
 
     private fun save() {
-        val o = JSONObject().put("v", 4)
+        val o = JSONObject().put("v", 5)
         val rj = JSONObject()
         rings.forEach { (k, pts) -> val arr = JSONArray(); pts.forEach { arr.put(JSONArray().put(round6(it.lat)).put(round6(it.lon))) }; rj.put(k, arr) }
         o.put("rings", rj)
@@ -179,6 +216,7 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
         o.put("corrected", cj)
         o.put("atollsDone", JSONArray(atollsDone.toList()))
         o.put("notOnMap", JSONArray(notOnMap.toList()))
+        o.put("airportIslands", JSONArray(airportIslands.toList()))
         val tmp = File(file.parentFile, file.name + ".tmp")
         tmp.writeText(o.toString())
         if (!tmp.renameTo(file)) { file.writeText(o.toString()); tmp.delete() }

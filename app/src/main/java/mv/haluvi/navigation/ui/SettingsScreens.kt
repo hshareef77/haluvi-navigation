@@ -44,8 +44,7 @@ class SettingsScreen : Screen() {
         ui.button("Voice and vibration") { host.show { VoiceSettingsScreen() } }
         ui.button("Navigation") { host.show { NavigationSettingsScreen() } }
         ui.button("Google Maps") { host.show { GoogleSettingsScreen() } }
-        ui.button("Island map") { host.show { MapDataScreen() } }
-        ui.button("Island outlines") { host.show { IslandOutlinesScreen() } }
+        ui.button("Offline maps") { host.show { OfflineMapsScreen() } }
         ui.button("About") {
             host.show { TextScreen("About", listOf(
                 "Haluvi Navigation ${BuildConfig.VERSION_NAME}.",

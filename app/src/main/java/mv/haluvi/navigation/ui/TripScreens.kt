@@ -136,9 +136,9 @@ class IslandsScreen : Screen() {
         }
         islandAlertsToggle(this, ui)
         if (g.shapes.isEmpty) {
-            ui.info("For exact island stop announcements, download the island outlines once.")
-            ui.button("Download island outlines") { host.show { IslandOutlinesScreen() } }
-        } else ui.button("Island outlines") { host.show { IslandOutlinesScreen() } }
+            ui.info("For exact island stop announcements, download offline maps once.")
+            ui.button("Offline maps") { host.show { OfflineMapsScreen() } }
+        } else ui.button("Offline maps") { host.show { OfflineMapsScreen() } }
         ui.button("Back") { host.back() }
         return scroll
     }
@@ -168,7 +168,7 @@ class IslandOutlinesScreen : Screen() {
             return scroll
         }
         progressView = null
-        val oldRules = g.shapes.formatVersion in 1..3
+        val oldRules = g.shapes.formatVersion in 1..4
         ui.info(when {
             g.shapes.isEmpty -> "Outlines make island stop announcements exact. Download once; they then work offline."
             oldRules -> "Your outlines were downloaded with older matching rules. Press Download to update them with the corrected matching."
