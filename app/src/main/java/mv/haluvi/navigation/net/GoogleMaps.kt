@@ -15,7 +15,9 @@ data class OnlinePlace(
     val typeText: String = "",
     val source: String,
     var distance: Double? = null,
-    var bearing: Double? = null
+    var bearing: Double? = null,
+    /** Google place ID (may be kept permanently under Google's terms; positions must be refreshed). */
+    val placeId: String = ""
 ) {
     val key: String get() = name.lowercase() + "@" + String.format(java.util.Locale.US, "%.5f,%.5f", lat, lon)
 }
@@ -24,6 +26,8 @@ data class RouteStep(
     val instruction: String,
     /** "left" or "right" when Google says "Destination will be on the left/right" in this step. */
     val destinationSide: String = "",
+    /** Ready-made spoken action for offline routes, e.g. "take the second road on the right after the harbour". */
+    val spokenAction: String = "",
     val maneuver: String,
     val roadName: String,
     val distanceMeters: Double,
@@ -69,7 +73,7 @@ class GoogleMaps(private val keyProvider: () -> String) {
                 .put("radius", radius.coerceIn(100, 50000).toDouble())))
         }
         val text = Http.post("https://places.googleapis.com/v1/places:searchText", body.toString(), "application/json",
-            mapOf("X-Goog-Api-Key" to key, "X-Goog-FieldMask" to "places.displayName,places.formattedAddress,places.location,places.types,places.primaryTypeDisplayName"))
+            mapOf("X-Goog-Api-Key" to key, "X-Goog-FieldMask" to "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.primaryTypeDisplayName"))
         return parsePlacesNew(text)
     }
 
@@ -82,7 +86,7 @@ class GoogleMaps(private val keyProvider: () -> String) {
             val name = p.optJSONObject("displayName")?.optString("text").orEmpty().ifBlank { "Place" }
             val type = p.optJSONObject("primaryTypeDisplayName")?.optString("text").orEmpty()
                 .ifBlank { typesText(p.optJSONArray("types")) }
-            out.add(OnlinePlace(name, loc.getDouble("latitude"), loc.getDouble("longitude"), p.optString("formattedAddress"), type, "google"))
+            out.add(OnlinePlace(name, loc.getDouble("latitude"), loc.getDouble("longitude"), p.optString("formattedAddress"), type, "google", placeId = p.optString("id")))
         }
         return out
     }
@@ -96,7 +100,7 @@ class GoogleMaps(private val keyProvider: () -> String) {
         return (0 until arr.length()).mapNotNull { i ->
             val r = arr.getJSONObject(i)
             val l = r.optJSONObject("geometry")?.optJSONObject("location") ?: return@mapNotNull null
-            OnlinePlace(r.optString("name", "Place"), l.getDouble("lat"), l.getDouble("lng"), r.optString("formatted_address"), typesText(r.optJSONArray("types")), "google")
+            OnlinePlace(r.optString("name", "Place"), l.getDouble("lat"), l.getDouble("lng"), r.optString("formatted_address"), typesText(r.optJSONArray("types")), "google", placeId = r.optString("place_id"))
         }
     }
 
@@ -107,7 +111,7 @@ class GoogleMaps(private val keyProvider: () -> String) {
                 .put("locationRestriction", JSONObject().put("circle", JSONObject()
                     .put("center", JSONObject().put("latitude", lat).put("longitude", lon)).put("radius", radius.coerceIn(20, 50000).toDouble())))
             parsePlacesNew(Http.post("https://places.googleapis.com/v1/places:searchNearby", body.toString(), "application/json",
-                mapOf("X-Goog-Api-Key" to key, "X-Goog-FieldMask" to "places.displayName,places.formattedAddress,places.location,places.types,places.primaryTypeDisplayName")))
+                mapOf("X-Goog-Api-Key" to key, "X-Goog-FieldMask" to "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.primaryTypeDisplayName")))
         } catch (e: Exception) {
             val o = try {
                 JSONObject(Http.get("https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=$lat,$lon&rankby=distance&type=point_of_interest&key=${Http.enc(key)}"))
@@ -117,7 +121,7 @@ class GoogleMaps(private val keyProvider: () -> String) {
             (0 until arr.length()).mapNotNull { i ->
                 val r = arr.getJSONObject(i)
                 val l = r.optJSONObject("geometry")?.optJSONObject("location") ?: return@mapNotNull null
-                OnlinePlace(r.optString("name", "Place"), l.getDouble("lat"), l.getDouble("lng"), r.optString("vicinity"), typesText(r.optJSONArray("types")), "google")
+                OnlinePlace(r.optString("name", "Place"), l.getDouble("lat"), l.getDouble("lng"), r.optString("vicinity"), typesText(r.optJSONArray("types")), "google", placeId = r.optString("place_id"))
             }
         }
         list.forEach { it.distance = Geo.distance(lat, lon, it.lat, it.lon); it.bearing = Geo.bearing(lat, lon, it.lat, it.lon) }
@@ -126,6 +130,53 @@ class GoogleMaps(private val keyProvider: () -> String) {
 
     /** Nearest named place to a point (for "Where am I"). */
     fun nearestPlace(lat: Double, lon: Double): OnlinePlace? = nearby(lat, lon, 300).firstOrNull()
+
+    /** Current position of a Google place (used to refresh saved Google places, as Google's terms require). */
+    fun placeLocation(placeId: String): LatLon? {
+        val text = Http.get("https://places.googleapis.com/v1/places/${Http.enc(placeId)}",
+            mapOf("X-Goog-Api-Key" to key, "X-Goog-FieldMask" to "location"))
+        val loc = JSONObject(text).optJSONObject("location") ?: return null
+        return LatLon(loc.getDouble("latitude"), loc.getDouble("longitude"))
+    }
+
+    // ---------------- Roads ----------------
+
+    private val roadNames = HashMap<String, String>()
+    @Volatile var roadsApiWorks = true
+        private set
+
+    /**
+     * Name of the road the recent GPS points are on, using the Roads API (snaps the track to the road).
+     * Returns null when not known. If the Roads API is not enabled for the key, it is not asked again.
+     */
+    fun snappedRoadName(track: List<LatLon>): String? {
+        if (!roadsApiWorks || track.isEmpty()) return null
+        val path = track.takeLast(5).joinToString("|") { String.format(java.util.Locale.US, "%.6f,%.6f", it.lat, it.lon) }
+        val o = try {
+            JSONObject(Http.get("https://roads.googleapis.com/v1/snapToRoads?path=${Http.enc(path)}&interpolate=false&key=${Http.enc(key)}"))
+        } catch (e: HttpException) {
+            if (e.code == 403 || e.code == 400) roadsApiWorks = false
+            throw e
+        }
+        val arr = o.optJSONArray("snappedPoints") ?: return null
+        if (arr.length() == 0) return null
+        val pid = arr.getJSONObject(arr.length() - 1).optString("placeId")
+        if (pid.isBlank()) return null
+        roadNames[pid]?.let { return it.ifBlank { null } }
+        val g = JSONObject(Http.get("https://maps.googleapis.com/maps/api/geocode/json?place_id=${Http.enc(pid)}&language=en&key=${Http.enc(key)}"))
+        var name = ""
+        val res = g.optJSONArray("results")
+        if (res != null && res.length() > 0) {
+            val comps = res.getJSONObject(0).optJSONArray("address_components")
+            if (comps != null) for (c in 0 until comps.length()) {
+                val comp = comps.getJSONObject(c)
+                if (comp.optJSONArray("types")?.toString().orEmpty().contains("\"route\"")) { name = comp.optString("long_name"); break }
+            }
+        }
+        if (name.contains("Unnamed", true)) name = ""
+        roadNames[pid] = name
+        return name.ifBlank { null }
+    }
 
     // ---------------- Geocoding ----------------
 
@@ -214,11 +265,12 @@ class GoogleMaps(private val keyProvider: () -> String) {
             val s = arr.getJSONObject(i)
             val (inst, side) = splitDestinationSide(cleanInstruction(s.optString("html_instructions")))
             fun ll(name: String) = s.optJSONObject(name)?.let { LatLon(it.getDouble("lat"), it.getDouble("lng")) }
-            RouteStep(inst.ifBlank { "Continue" }, side, s.optString("maneuver"), roadFromInstruction(inst),
-                s.optJSONObject("distance")?.optDouble("value", 0.0) ?: 0.0,
-                s.optJSONObject("duration")?.optDouble("value", 0.0) ?: 0.0,
-                ll("start_location"), ll("end_location"),
-                Geo.decodePolyline(s.optJSONObject("polyline")?.optString("points").orEmpty()))
+            RouteStep(instruction = inst.ifBlank { "Continue" }, destinationSide = side, maneuver = s.optString("maneuver"),
+                roadName = roadFromInstruction(inst),
+                distanceMeters = s.optJSONObject("distance")?.optDouble("value", 0.0) ?: 0.0,
+                durationSeconds = s.optJSONObject("duration")?.optDouble("value", 0.0) ?: 0.0,
+                start = ll("start_location"), end = ll("end_location"),
+                polyline = Geo.decodePolyline(s.optJSONObject("polyline")?.optString("points").orEmpty()))
         }
         return Route(steps, leg.optJSONObject("distance")?.optDouble("value", 0.0) ?: 0.0,
             leg.optJSONObject("duration")?.optDouble("value", 0.0) ?: 0.0, r.optString("summary"), "Google Directions")

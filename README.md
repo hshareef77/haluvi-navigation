@@ -13,7 +13,10 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
   - Island alerts in background: announcements and notifications at sea without opening the app.
 - **While navigating**: the next instruction, distance and time, Repeat, What's in this direction, Stop.
   - Google road routes (optional) with spoken turn instructions and automatic re-route.
-  - Without Google: clock-position guidance ("2 o'clock, 300 meters").
+  - Offline routes calculated on the phone from downloaded roads (no internet), with turn, count and
+    landmark instructions ("take the second road on the right at the harbour").
+  - Online with a Google key: Google routes first; the offline route is used when offline or when Google fails.
+  - Without either: clock-position guidance ("2 o'clock, 300 meters").
   - The phone vibrates while it points at the destination.
 - **Explore**: your road, intersections on your road, and places as you pass them. Pauses when GPS is weak.
 - **What's around me**: nearest places with clock positions, by category.

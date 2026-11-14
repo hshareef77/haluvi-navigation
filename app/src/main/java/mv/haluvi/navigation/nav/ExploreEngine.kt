@@ -63,6 +63,9 @@ class ExploreEngine(
     /** Set by AppGraph: true when the position is on the sea (island announcements take over). */
     var atSea: (Fix) -> Boolean = { false }
 
+    // Recent good positions (for matching the track to a Google road)
+    private val track = ArrayList<mv.haluvi.navigation.core.LatLon>()
+
     // GPS gate
     private var goodCount = 0
     private var badSinceMs = 0L
@@ -158,6 +161,7 @@ class ExploreEngine(
         }
         badSinceMs = 0
         goodCount++
+        f?.let { track.add(mv.haluvi.navigation.core.LatLon(it.lat, it.lon)); if (track.size > 5) track.removeAt(0) }
         if (paused) {
             if (goodCount < 2) return
             paused = false
@@ -265,11 +269,16 @@ class ExploreEngine(
         val moved = Geo.distance(roadLat, roadLon, f.lat, f.lon)
         if (now - roadLastMs < (if (driving) 5000 else 8000) || moved < 10) return false
         roadBusy = true; roadLastMs = now; roadLat = f.lat; roadLon = f.lon
+        val recent = track.toList()
         scope.launch {
-            val r = withContext(Dispatchers.IO) { runCatching { google.reverseGeocode(f.lat, f.lon) } }
+            // Roads API matches the recent track to the road (reliable at corners); address lookup as fallback.
+            val name = withContext(Dispatchers.IO) {
+                runCatching { google.snappedRoadName(recent) }.getOrNull()
+                    ?: runCatching { google.reverseGeocode(f.lat, f.lon).road }.getOrNull()
+            }
             roadBusy = false
             if (!active) return@launch
-            r.getOrNull()?.road?.takeIf { it.isNotBlank() }?.let { acceptRoad(it, true, strong = false) }
+            name?.takeIf { it.isNotBlank() }?.let { acceptRoad(it, true, strong = recent.size >= 3 && google.roadsApiWorks) }
             notifyChanged()
         }
         return false

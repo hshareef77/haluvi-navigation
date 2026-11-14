@@ -157,7 +157,7 @@ class GoogleSettingsScreen : Screen() {
             host.show { TextScreen("How to get a key", listOf(
                 "1. On a computer, open console.cloud.google.com and create a project.",
                 "2. Add billing to the project.",
-                "3. Enable: Places API (New), Routes API, Geocoding API.",
+                "3. Enable: Places API (New), Routes API, Geocoding API. Optional: Roads API, for more reliable road names in Explore.",
                 "4. Create an API key in Credentials.",
                 "5. Paste it here, press Save key, then Check key."
             )) }

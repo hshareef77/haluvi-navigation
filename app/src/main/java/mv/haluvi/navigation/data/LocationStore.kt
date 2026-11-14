@@ -60,7 +60,9 @@ data class SavedLocation(
     var categoryId: String = "none",
     var islandKey: String = "",
     var islandName: String = "",
-    var address: String = ""
+    var address: String = "",
+    /** Google place ID for places saved from Google (their position is refreshed every few weeks). */
+    var placeId: String = ""
 ) {
     val isDownloadedMapPlace: Boolean get() = source == SOURCE_OSM_MAP
     val categoryName: String get() = Categories.name(categoryId)
@@ -69,7 +71,7 @@ data class SavedLocation(
         .put("id", id).put("name", name).put("lat", lat).put("lon", lon)
         .put("accuracy", accuracy).put("savedTime", savedTime).put("source", source)
         .put("categoryId", categoryId).put("islandKey", islandKey).put("islandName", islandName)
-        .put("address", address)
+        .put("address", address).put("placeId", placeId)
 
     companion object {
         const val SOURCE_MANUAL = "manual"
@@ -91,7 +93,8 @@ data class SavedLocation(
                 categoryId = o.optString("categoryId", "none"),
                 islandKey = o.optString("islandKey", ""),
                 islandName = o.optString("islandName", ""),
-                address = o.optString("address", "")
+                address = o.optString("address", ""),
+                placeId = o.optString("placeId", "")
             ).takeIf { !it.lat.isNaN() && !it.lon.isNaN() }
         }
     }

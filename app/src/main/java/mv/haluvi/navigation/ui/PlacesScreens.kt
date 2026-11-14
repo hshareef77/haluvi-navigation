@@ -217,7 +217,7 @@ class SearchScreen : Screen() {
             ui.button(text) {
                 val loc = SavedLocation(SavedLocation.newId(), p.name, p.lat, p.lon,
                     source = if (p.source == "google") SavedLocation.SOURCE_GOOGLE else SavedLocation.SOURCE_OSM_SEARCH,
-                    categoryId = Categories.guess(p.name + " " + p.typeText), address = p.address)
+                    categoryId = Categories.guess(p.name + " " + p.typeText), address = p.address, placeId = p.placeId)
                 goToPlace(host, loc)
             }
         }

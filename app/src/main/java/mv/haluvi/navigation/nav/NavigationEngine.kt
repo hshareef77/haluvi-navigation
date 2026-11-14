@@ -409,8 +409,12 @@ class NavigationEngine(
     // Google route guidance
     // =====================================================================
 
+    /**
+     * Gets a road route: Google when online with a key; otherwise (or when Google fails) an offline
+     * route calculated on the phone from downloaded roads. Without either, direct guidance continues.
+     */
     private fun maybeRequestRoute(f: Fix, force: Boolean = false) {
-        if (!settings.googleReady || routeBusy) return
+        if (routeBusy) return
         val t = target ?: return
         if (t.kind != NavKind.PLACE) return
         if (!force && now - lastRouteRequestMs < 60_000) return
@@ -420,21 +424,34 @@ class NavigationEngine(
         routeMessage = if (route == null) "Getting route." else "Updating route."
         val mode = settings.travelMode
         val targetAtRequest = t
+        val useGoogle = settings.googleReady
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { google.route(f.lat, f.lon, t.lat, t.lon, mode) } }
+            var r: Route? = null
+            var googleError: Throwable? = null
+            if (useGoogle) {
+                r = withContext(Dispatchers.IO) { runCatching { google.route(f.lat, f.lon, t.lat, t.lon, mode) } }
+                    .onFailure { googleError = it }.getOrNull()
+            }
+            if (r == null) {
+                r = withContext(Dispatchers.Default) {
+                    runCatching { OfflineRouter.route(mv.haluvi.navigation.core.LatLon(f.lat, f.lon), mv.haluvi.navigation.core.LatLon(t.lat, t.lon), mode) }.getOrNull()
+                }
+            }
             routeBusy = false
             if (target != targetAtRequest) return@launch
-            result.onSuccess { r ->
+            val got = r
+            if (got != null && got.steps.isNotEmpty()) {
                 val rerouted = route != null || spokenManeuvers.isNotEmpty()
-                route = r; stepIndex = 0; spokenManeuvers.clear(); offRouteCount = 0
+                route = got; stepIndex = 0; spokenManeuvers.clear(); offRouteCount = 0
                 stepLiveIndex = -1; stepLiveRemaining = null; lastRemaining = null
-                routeMessage = "Route: ${Phrases.distance(r.distanceMeters)}, about ${Fmt.duration(r.durationSeconds)}."
-                location.fix?.let { routeTick(it, r, smoothedSpeed, announceFirst = true, rerouted = rerouted) }
-                notifyChanged()
-            }.onFailure { e ->
-                routeMessage = "No road route. Using direct guidance. " + google.describeError(e)
-                notifyChanged()
+                val source = if (got.source == "Offline") "Offline route" else "Google route"
+                routeMessage = "$source: ${Phrases.distance(got.distanceMeters)}, about ${Fmt.duration(got.durationSeconds)}."
+                location.fix?.let { routeTick(it, got, smoothedSpeed, announceFirst = true, rerouted = rerouted) }
+            } else {
+                routeMessage = "No road route. Using direct guidance." +
+                    (googleError?.let { " " + google.describeError(it) } ?: if (!useGoogle) " Download the offline map of this island for routes without internet." else "")
             }
+            notifyChanged()
         }
     }
 
@@ -506,6 +523,8 @@ class NavigationEngine(
 
     fun maneuverText(step: RouteStep?): String {
         if (step == null) return ""
+        // Offline routes carry their own complete wording ("take the second road on the right at the harbour").
+        if (step.spokenAction.isNotBlank()) return step.spokenAction
         val m = step.maneuver.lowercase()
         val low = step.instruction.lowercase()
         var action = when {
@@ -562,7 +581,8 @@ class NavigationEngine(
 
         // ---- spoken guidance ----
         if (announceFirst) {
-            speaker.speak((if (rerouted) "New route. " else "Route ready, ${Phrases.distance(r.distanceMeters)}. ") + instructionText)
+            val kind = if (r.source == "Offline") "Offline route" else "Route"
+            speaker.speak((if (rerouted) "New route. " else "$kind ready, ${Phrases.distance(r.distanceMeters)}. ") + instructionText)
         } else if (advanced && settings.turnAnnouncementsOn) {
             speaker.speak(instructionText)
         } else if (settings.turnAnnouncementsOn && following != null && d != null) {

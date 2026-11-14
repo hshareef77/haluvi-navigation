@@ -16,10 +16,11 @@ data class NearbyItem(
     val categoryId: String,
     val saved: SavedLocation?,
     val distance: Double,
-    val bearing: Double
+    val bearing: Double,
+    val placeId: String = ""
 ) {
     val key: String get() = name.lowercase() + "@" + String.format(Locale.US, "%.4f,%.4f", lat, lon)
-    fun toSavedLocation(): SavedLocation = saved ?: SavedLocation(SavedLocation.newId(), name, lat, lon, source = SavedLocation.SOURCE_GOOGLE, categoryId = categoryId)
+    fun toSavedLocation(): SavedLocation = saved ?: SavedLocation(SavedLocation.newId(), name, lat, lon, source = SavedLocation.SOURCE_GOOGLE, categoryId = categoryId, placeId = placeId)
 }
 
 /** "What's around me" and "What's in this direction". */
@@ -48,7 +49,7 @@ object Surroundings {
                 list.forEach { p ->
                     val cat = Categories.guess(p.name + " " + p.typeText)
                     if (category != "all" && cat != category) return@forEach
-                    val n = NearbyItem(p.name, p.lat, p.lon, cat, null, p.distance ?: Geo.distance(f.lat, f.lon, p.lat, p.lon), p.bearing ?: Geo.bearing(f.lat, f.lon, p.lat, p.lon))
+                    val n = NearbyItem(p.name, p.lat, p.lon, cat, null, p.distance ?: Geo.distance(f.lat, f.lon, p.lat, p.lon), p.bearing ?: Geo.bearing(f.lat, f.lon, p.lat, p.lon), p.placeId)
                     // Skip Google duplicates of places already saved within 25 m with a similar name.
                     val dup = out.values.any { it.name.equals(n.name, true) || (Geo.distance(it.lat, it.lon, n.lat, n.lon) < 8 && it.name.take(5).equals(n.name.take(5), true)) }
                     if (!dup) out.putIfAbsent(n.key, n)
