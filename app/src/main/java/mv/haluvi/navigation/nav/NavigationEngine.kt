@@ -107,6 +107,10 @@ class NavigationEngine(
     private var lastHintSpeakMs = 0L
     private var lastPointProcessMs = 0L
     private var lastDistance: Double? = null
+    // Final approach / passed detection (places)
+    private var minDist = Double.MAX_VALUE
+    private var passedAnnounced = false
+    private val approachSpoken = HashSet<Int>()
 
     private val fixListener: (Fix) -> Unit = { f ->
         compass.updateDeclination(f.lat, f.lon, f.altitude)
@@ -193,6 +197,7 @@ class NavigationEngine(
         distHistory.clear(); arrivalCount = 0
         lastDistSpoken = -1; lastDistSpeakMs = 0; lastGpsWaitSpeakMs = 0
         smoothedSpeed = null; lastSpeedDist = null; lastSpeedMs = 0; lastDistance = null
+        minDist = Double.MAX_VALUE; passedAnnounced = false; approachSpoken.clear()
         pointing = false; pointStatus = ""
         haptics.stopFocus()
     }
@@ -231,25 +236,82 @@ class NavigationEngine(
             if (f.altitudeIsMsl) "Altitude: $m meters above sea level" else "Altitude: $m meters, GPS"
         } ?: "Altitude: waiting for GPS"
 
-        if (confirmArrival(dist, f)) { arrive(t); return }
+        val moving = isMoving(f)
+        val heading = travelHeading(f)
+        // For places, also measure to where the place meets the road (end of the Google route),
+        // because a saved position is often the middle of a building.
+        val effDist = if (t.kind == NavKind.PLACE) min(dist, roadPointDistance(f) ?: dist) else dist
 
-        directionText = "Destination ${Phrases.where(compass.heading, bearing)}."
+        if (confirmArrival(effDist, f, speed)) { arrive(t, f); return }
+
+        directionText = "Destination ${Phrases.where(heading, bearing)}."
         val r = route
         if (t.kind == NavKind.PLACE && r != null) {
             routeTick(f, r, speed)
         } else {
             val eta = if (speed != null && speed >= 0.3) ", about ${Fmt.duration(dist / speed)}" else ""
             distanceText = "${Phrases.distance(dist)} left$eta."
-            instructionText = "${t.name}, ${Phrases.where(compass.heading, bearing).removePrefix("at ")}, ${Phrases.distance(dist)}."
-            directDistanceSpeech(t, dist, bearing)
+            instructionText = "${t.name}, ${Phrases.where(heading, bearing).removePrefix("at ")}, ${Phrases.distance(dist)}."
+            directDistanceSpeech(t, dist, bearing, heading)
             if (t.kind == NavKind.PLACE) maybeRequestRoute(f)
+        }
+        if (t.kind == NavKind.PLACE) {
+            val onLastStep = r == null || stepIndex >= r.steps.size - 1
+            if (onLastStep) finalApproach(t, f, effDist, bearing, heading, moving, r)
+            checkPassed(t, f, effDist, bearing, heading, moving)
         }
         notifyChanged()
     }
 
-    private fun directDistanceSpeech(t: Destination, dist: Double, bearing: Double) {
+    private fun isMoving(f: Fix) = f.bearing != null && (f.speedMps ?: 0.0) >= 1.0
+
+    /** Travel direction from GPS movement when moving (reliable in a car or pocket); phone compass when standing. */
+    private fun travelHeading(f: Fix): Double = if (isMoving(f)) f.bearing!! else compass.heading
+
+    private fun driving(speed: Double?) = settings.travelMode == TravelMode.DRIVING || (speed ?: 0.0) >= 4.0
+
+    private fun roadPointDistance(f: Fix): Double? = route?.steps?.lastOrNull()?.end?.let { Geo.distance(f.lat, f.lon, it.lat, it.lon) }
+
+    /** "on your right" etc.: Google's side on the last step when available, otherwise from the movement direction. */
+    private fun destinationSide(bearing: Double, heading: Double, moving: Boolean, r: Route?): String? {
+        val g = r?.steps?.lastOrNull { it.destinationSide.isNotBlank() }?.destinationSide
+        if (g != null && r != null && r.steps.size - 1 <= stepIndex) return "on your $g"
+        if (!moving) return null
+        val side = Geo.relativeSide(heading, bearing)
+        return if (side == "behind") null else side
+    }
+
+    /** Short, frequent messages near the end: "In 50 meters, destination on your right." */
+    private fun finalApproach(t: Destination, f: Fix, d: Double, bearing: Double, heading: Double, moving: Boolean, r: Route?) {
+        val thresholds = if (driving(f.speedMps)) intArrayOf(300, 150, 50) else intArrayOf(100, 50, 30, 10)
+        val hit = thresholds.filter { d <= it }.minOrNull() ?: return
+        if (!approachSpoken.add(hit)) return
+        thresholds.filter { it > hit }.forEach { approachSpoken.add(it) } // never say a farther one later
+        val side = destinationSide(bearing, heading, moving, r)
+        val where = side?.let { "destination $it" } ?: "destination ${Phrases.where(heading, bearing)}"
+        speaker.speak("In ${Phrases.distance(d)}, $where.")
+        lastDistSpeakMs = now; lastDistSpoken = d.roundToInt()
+    }
+
+    /** Tells the user clearly when the destination is behind them, then finds a new route. */
+    private fun checkPassed(t: Destination, f: Fix, d: Double, bearing: Double, heading: Double, moving: Boolean) {
+        val drive = driving(f.speedMps)
+        if (passedAnnounced && d < minDist - 5) { passedAnnounced = false; minDist = d } // coming back towards it
+        if (d < minDist) minDist = d
+        if (passedAnnounced || !moving) return
+        val nearEnough = minDist <= if (drive) 80.0 else 35.0
+        val goingAway = d >= minDist + (if (drive) 25.0 else 12.0)
+        if (nearEnough && goingAway && Geo.relativeSide(heading, bearing) == "behind") {
+            passedAnnounced = true
+            approachSpoken.clear()
+            speaker.speak("You passed ${t.name}. It is ${Phrases.distance(d)} behind you. Turn around when safe.")
+            if (route != null) location.fix?.let { maybeRequestRoute(it, force = true) }
+        }
+    }
+
+    private fun directDistanceSpeech(t: Destination, dist: Double, bearing: Double, heading: Double) {
         val d = dist.roundToInt()
-        val text = "${Phrases.distance(dist)}, ${Phrases.where(compass.heading, bearing).removePrefix("at ")}."
+        val text = "${Phrases.distance(dist)}, ${Phrases.where(heading, bearing).removePrefix("at ")}."
         if (lastDistSpoken < 0) {
             lastDistSpoken = d; lastDistSpeakMs = now
             speaker.speak("${t.name}, $text", flush = false)
@@ -258,8 +320,11 @@ class NavigationEngine(
         val milestones = when {
             t.kind == NavKind.ISLAND && settings.islandTravelAir -> intArrayOf(100000, 50000, 20000, 10000, 5000)
             t.kind == NavKind.ISLAND -> intArrayOf(20000, 10000, 5000, 2000, 1000)
-            else -> intArrayOf(500, 200, 100, 50, 20)
+            // Near the end of a place trip, finalApproach() speaks (100, 50, 30, 10 m).
+            settings.travelMode == TravelMode.DRIVING -> intArrayOf(2000, 1000, 500)
+            else -> intArrayOf(500, 200)
         }
+        if (t.kind == NavKind.PLACE && dist <= (if (settings.travelMode == TravelMode.DRIVING) 300 else 100)) return
         var shouldSpeak = milestones.any { lastDistSpoken > it && d <= it }
         if (!shouldSpeak && now - lastDistSpeakMs >= 60_000) shouldSpeak = true
         if (shouldSpeak) { lastDistSpeakMs = now; lastDistSpoken = d; speaker.speak(text) }
@@ -295,7 +360,7 @@ class NavigationEngine(
         return smoothedSpeed
     }
 
-    private fun confirmArrival(dist: Double, f: Fix): Boolean {
+    private fun confirmArrival(dist: Double, f: Fix, speed: Double?): Boolean {
         val t = target ?: return false
         if (t.kind == NavKind.ISLAND) {
             val key = t.islandKey.orEmpty()
@@ -307,20 +372,30 @@ class NavigationEngine(
             arrivalCount++
             return arrivalCount >= 2
         }
-        val arrivalDist = if (t.kind == NavKind.ISLAND) settings.islandArrivalDistance.toDouble() else settings.arrivalDistance.toDouble()
-        // Accept a slightly larger circle when GPS is weak, so arrival is not missed.
-        val limit = if (t.kind == NavKind.PLACE) max(arrivalDist, min(f.accuracy * 0.8, 25.0)) else arrivalDist
+        val arrivalDist = settings.arrivalDistance.toDouble()
+        // Driving: a bigger zone (you stop or park near the place). Weak GPS: a slightly bigger circle.
+        val limit = if (driving(speed)) max(40.0, arrivalDist) else max(arrivalDist, min(f.accuracy * 0.8, 25.0))
         if (f.accuracy >= 100 || dist > limit) { arrivalCount = 0; return false }
         if (now - startedMs < 5000 && dist > max(2.0, limit / 2)) return false
         arrivalCount++
-        return arrivalCount >= 2
+        // When moving fast one reading inside the zone is enough (the next one may already be past it).
+        return arrivalCount >= 2 || (speed ?: 0.0) >= 3.0
     }
 
     /** Called by IslandWatcher when the boat or plane has stopped at the destination island. */
-    fun arrivedAtIsland() { target?.takeIf { it.kind == NavKind.ISLAND }?.let { arrive(it) } }
+    fun arrivedAtIsland() { target?.takeIf { it.kind == NavKind.ISLAND }?.let { arrive(it, null) } }
 
-    private fun arrive(t: Destination) {
-        val text = if (t.kind == NavKind.ISLAND) "Arrived at your destination, ${t.name}." else "Arrived at ${t.name}."
+    private fun arrive(t: Destination, f: Fix?) {
+        var side: String? = null
+        if (t.kind == NavKind.PLACE && f != null) {
+            val b = Geo.bearing(f.lat, f.lon, t.lat, t.lon)
+            side = destinationSide(b, travelHeading(f), isMoving(f), route)
+        }
+        val text = when {
+            t.kind == NavKind.ISLAND -> "Arrived at your destination, ${t.name}."
+            side != null -> "Arrived at ${t.name}, $side."
+            else -> "Arrived at ${t.name}."
+        }
         clearActiveState()
         lastArrivalText = text
         speaker.speak(text)
@@ -369,7 +444,6 @@ class NavigationEngine(
         location.fix?.let { maybeRequestRoute(it, force = true) }
     }
 
-    private fun travelHeading(f: Fix?): Double = f?.bearing ?: compass.heading
 
     private fun stepBearing(s: RouteStep): Double? {
         if (s.polyline.size >= 2) {
@@ -468,18 +542,20 @@ class NavigationEngine(
         val current = r.steps.getOrNull(stepIndex)
         val d = stepRemaining?.roundToInt()
         val driving = settings.travelMode == TravelMode.DRIVING
+        val gSide = r.steps.lastOrNull { it.destinationSide.isNotBlank() }?.destinationSide
+        val arriveText = if (gSide != null) "destination on your $gSide" else "arrive at destination"
         val nowDist = if (driving) 25 else 8
         instructionText = if (following != null) {
             val man = maneuverText(following)
             when {
-                man == "arrive" && d != null && d <= nowDist -> "Arriving at destination."
-                man == "arrive" && d != null -> "In ${Phrases.distance(d.toDouble())}, arrive at destination."
+                man == "arrive" && d != null && d <= nowDist -> "Arriving, ${arriveText.removePrefix("arrive at ")}."
+                man == "arrive" && d != null -> "In ${Phrases.distance(d.toDouble())}, $arriveText."
                 d != null && d <= nowDist -> "Now ${man}."
                 d != null -> "In ${Phrases.distance(d.toDouble())}, ${man}."
                 else -> "Then ${man}."
             }
         } else {
-            if (d != null) "In ${Phrases.distance(d.toDouble())}, arrive at destination." else "Continue to destination."
+            if (d != null) "In ${Phrases.distance(d.toDouble())}, $arriveText." else "Continue to destination."
         }
         current?.let { stepBearing(it) }?.let { b -> directionText = "Road direction ${Phrases.where(compass.heading, b)}." }
 
@@ -545,6 +621,8 @@ class NavigationEngine(
         if (now - lastPointProcessMs < 60) return
         lastPointProcessMs = now
         val f = location.fix ?: return
+        // In a moving car or boat the phone is not being pointed; pointing vibration would mislead.
+        if ((f.speedMps ?: 0.0) > 3.0) { if (pointing) { pointing = false; haptics.stopFocus() }; return }
         val bearing = Geo.bearing(f.lat, f.lon, t.lat, t.lon)
         val diff = Geo.headingDifference(heading, bearing)
         val a = abs(diff)

@@ -63,11 +63,14 @@ class MainActivity : Activity() {
         AppGraph.explore.addListener(liveListener)
         showHome()
         requestPermissionsIfNeeded()
+        if (AppGraph.settings.islandAlertsOn) mv.haluvi.navigation.nav.NavigationService.ensureRunning(this)
     }
 
     override fun onStart() {
         super.onStart()
         visible = true
+        AppGraph.uiVisible = true
+        AppGraph.location.setInterval(1000L)
         AppGraph.location.acquire()
         AppGraph.compass.acquire()
         main.post(second)
@@ -76,6 +79,7 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         visible = false
+        AppGraph.uiVisible = false
         main.removeCallbacks(second)
         AppGraph.location.release()
         AppGraph.compass.release()

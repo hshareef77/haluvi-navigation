@@ -38,6 +38,9 @@ object AppGraph {
     lateinit var explore: ExploreEngine; private set
     lateinit var islandWatcher: IslandWatcher; private set
 
+    /** True while the app's screen is visible (notifications are then not needed). */
+    @Volatile var uiVisible = false
+
     fun init(app: Application) {
         settings = Settings(app)
         islands = IslandRepository(app)
@@ -51,7 +54,7 @@ object AppGraph {
         osm = OpenStreetMap()
         nav = NavigationEngine(app, settings, islands, shapes, store, location, compass, speaker, haptics, google)
         explore = ExploreEngine(app, settings, islands, store, location, speaker, google, nav)
-        islandWatcher = IslandWatcher(settings, shapes, location, speaker, haptics, nav) { explore.active }
+        islandWatcher = IslandWatcher(app, settings, shapes, location, speaker, haptics, nav) { explore.active }
         explore.atSea = { f -> islandWatcher.atSea(f) }
         compass.onCalibrationNeeded = {
             if (nav.isActive || explore.active) speaker.speak("Compass needs calibration. Move the phone in a figure eight.", flush = false)

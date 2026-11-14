@@ -8,7 +8,9 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
 - **Places** (walking or driving): From (my location or a saved place), To (my places, search, what's around me), Start.
 - **Islands** (sea or air): From (GPS island or chosen), To (any of the 200 inhabited islands), Start.
   - Island stop announcements: "Approaching …", "Arrived at …" (ferry stop), "Passing …".
-  - Exact with island outlines, downloaded once in the app from OpenStreetMap.
+  - Exact with island outlines, downloaded once in the app from OpenStreetMap (continues where it stopped,
+    lists missing islands, includes other named islands such as resorts, shareable report).
+  - Island alerts in background: announcements and notifications at sea without opening the app.
 - **While navigating**: the next instruction, distance and time, Repeat, What's in this direction, Stop.
   - Google road routes (optional) with spoken turn instructions and automatic re-route.
   - Without Google: clock-position guidance ("2 o'clock, 300 meters").

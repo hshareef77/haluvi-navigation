@@ -22,6 +22,21 @@ private fun Screen.toggle(ui: UiBuilder, label: String, get: () -> Boolean, set:
     }
 }
 
+/** Background island alerts switch (also on the Islands screen). */
+fun islandAlertsToggle(screen: Screen, ui: UiBuilder) {
+    val s = AppGraph.settings
+    val host = screen.host
+    ui.button("Island alerts in background: ${onOff(s.islandAlertsOn)}") {
+        if (!s.islandAlertsOn && !host.hasLocationPermission()) { host.requestPermissionsIfNeeded(); return@button }
+        s.islandAlertsOn = !s.islandAlertsOn
+        if (s.islandAlertsOn) mv.haluvi.navigation.nav.NavigationService.ensureRunning(host)
+        else mv.haluvi.navigation.nav.NavigationService.updateOrStop(host)
+        host.say(if (s.islandAlertsOn) "Island alerts on" else "Island alerts off")
+        screen.rebuild()
+    }
+    if (s.islandAlertsOn) ui.info("At sea, islands are announced and shown as notifications, even when the app is closed.")
+}
+
 class SettingsScreen : Screen() {
     override fun create(): View {
         val (scroll, ui) = UiBuilder.scrolling(host)
@@ -80,7 +95,8 @@ class NavigationSettingsScreen : Screen() {
             host.say("Travel mode: ${s.travelMode.label}")
             rebuild()
         }
-        ui.button("Directions: ${if (s.clockDirections) "clock" else "compass"}") {
+        ui.button(if (s.clockDirections) "Directions: clock. Example: 2 o'clock is ahead to the right. Tap for compass."
+            else "Directions: compass. Example: north east, 45 degrees. Tap for clock.") {
             s.clockDirections = !s.clockDirections
             host.say(if (s.clockDirections) "Directions as clock positions" else "Directions as compass degrees")
             rebuild()
@@ -99,6 +115,7 @@ class NavigationSettingsScreen : Screen() {
             host.show(Pickers.meters(host, "Island arrival distance", listOf(300, 500, 1000, 2000), s.islandArrivalDistance) { s.islandArrivalDistance = it })
         }
         toggle(ui, "Island stop announcements", { s.islandStopAnnouncementsOn }) { s.islandStopAnnouncementsOn = it }
+        islandAlertsToggle(this, ui)
         toggle(ui, "Keep screen on", { s.keepAwake }) { s.keepAwake = it }
         ui.button("Refresh GPS") { AppGraph.location.restart(); host.say("GPS refreshed") }
         ui.button("Back") { host.back() }

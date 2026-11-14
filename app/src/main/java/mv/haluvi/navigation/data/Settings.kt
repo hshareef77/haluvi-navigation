@@ -35,6 +35,8 @@ class Settings(context: Context) {
     var islandArrivalDistance by int("islandArrivalDistance", 1000)
     /** "Approaching / Arrived at / Passing" island announcements during island trips and Explore at sea. */
     var islandStopAnnouncementsOn by bool("islandStopAnnouncementsOn", true)
+    /** Background island alerts: announcements and notifications at sea without opening the app. */
+    var islandAlertsOn by bool("islandAlertsOn", false)
     /** Island trips: false = sea (ferry, boat), true = air (plane, seaplane). */
     var islandTravelAir by bool("islandTravelAir", false)
     /** Places "From": saved place id, or empty for my GPS location. */

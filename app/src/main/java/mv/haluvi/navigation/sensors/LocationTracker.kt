@@ -42,6 +42,16 @@ class LocationTracker(private val context: Context) {
     private val listeners = CopyOnWriteArrayList<(Fix) -> Unit>()
     private var users = 0
     private var running = false
+    /** GPS update interval. 1 s for navigation; longer for background island alerts on land to save battery. */
+    private var intervalMs = 1000L
+
+    /** Changes the GPS update interval (re-registers updates when it changes). */
+    @Synchronized
+    fun setInterval(ms: Long) {
+        if (ms == intervalMs) return
+        intervalMs = ms
+        if (running) { stop(); start() }
+    }
 
     @Volatile var fix: Fix? = null
         private set
@@ -89,11 +99,11 @@ class LocationTracker(private val context: Context) {
         readLastKnown()
         runCatching {
             if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER))
-                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, listener, Looper.getMainLooper())
+                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, intervalMs, 0f, listener, Looper.getMainLooper())
         }
         runCatching {
             if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER))
-                lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 0f, listener, Looper.getMainLooper())
+                lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, maxOf(3000L, intervalMs), 0f, listener, Looper.getMainLooper())
         }
         running = true
     }

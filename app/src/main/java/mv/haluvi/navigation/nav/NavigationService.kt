@@ -37,7 +37,7 @@ class NavigationService : Service() {
         }
 
         fun updateOrStop(context: Context) {
-            if (!AppGraph.nav.isActive && !AppGraph.explore.active) {
+            if (!AppGraph.nav.isActive && !AppGraph.explore.active && !AppGraph.settings.islandAlertsOn) {
                 if (running) context.stopService(Intent(context, NavigationService::class.java))
             }
         }
@@ -46,7 +46,19 @@ class NavigationService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastNotifyMs = 0L
     private var lastText = ""
-    private val changeListener: () -> Unit = { updateNotification(false) }
+    private val changeListener: () -> Unit = { syncResources(); updateNotification(false) }
+
+    /** Fast GPS while navigating, exploring or at sea; slow GPS for background island alerts on land (saves battery). */
+    private val fixListener: (mv.haluvi.navigation.sensors.Fix) -> Unit = { f ->
+        val g = AppGraph
+        val ms = when {
+            g.uiVisible || g.nav.isActive || g.explore.active -> 1000L
+            g.islandWatcher.recentlyAtSea() || (f.speedMps ?: 0.0) >= 2.0 -> 2000L
+            else -> 20_000L
+        }
+        g.location.setInterval(ms)
+        updateNotification(false)
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -59,6 +71,7 @@ class NavigationService : Service() {
         if (intent?.action == ACTION_STOP) {
             AppGraph.nav.stop()
             AppGraph.explore.stop()
+            AppGraph.settings.islandAlertsOn = false
             stopSelf()
             return START_NOT_STICKY
         }
@@ -73,16 +86,37 @@ class NavigationService : Service() {
         if (!running) {
             running = true
             AppGraph.location.acquire()
-            AppGraph.compass.acquire()
             AppGraph.nav.addListener(changeListener)
             AppGraph.explore.addListener(changeListener)
+            AppGraph.location.addListener(fixListener)
+        }
+        syncResources()
+        return START_NOT_STICKY
+    }
+
+    private var heavyHeld = false
+
+    /**
+     * Compass and a CPU wake lock are needed only while navigating or exploring (pointing vibration,
+     * timers with the screen off). Background island alerts alone run on GPS only, to save battery.
+     */
+    private fun syncResources() {
+        val heavy = AppGraph.nav.isActive || AppGraph.explore.active
+        if (heavy && !heavyHeld) {
+            heavyHeld = true
+            AppGraph.compass.acquire()
             val pm = getSystemService(POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Haluvi:navigation").apply {
                 setReferenceCounted(false)
                 acquire(6 * 60 * 60 * 1000L)
             }
+        } else if (!heavy && heavyHeld) {
+            heavyHeld = false
+            AppGraph.compass.release()
+            AppGraph.haptics.stopFocus()
+            runCatching { wakeLock?.release() }
+            wakeLock = null
         }
-        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -90,8 +124,10 @@ class NavigationService : Service() {
             running = false
             AppGraph.nav.removeListener(changeListener)
             AppGraph.explore.removeListener(changeListener)
+            AppGraph.location.removeListener(fixListener)
+            AppGraph.location.setInterval(1000L)
             AppGraph.location.release()
-            AppGraph.compass.release()
+            if (heavyHeld) { heavyHeld = false; AppGraph.compass.release() }
             AppGraph.haptics.stopFocus()
         }
         runCatching { wakeLock?.release() }
@@ -110,6 +146,7 @@ class NavigationService : Service() {
         return when {
             nav.isActive -> nav.notificationText().ifBlank { "Navigating" }
             explore.active -> explore.statusText + (if (explore.roadText.isNotBlank()) " " + explore.roadText else "")
+            AppGraph.settings.islandAlertsOn -> AppGraph.islandWatcher.lastMessage.ifBlank { "Watching for islands when you travel by sea." }
             else -> "Ready"
         }
     }
@@ -139,7 +176,12 @@ class NavigationService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else @Suppress("DEPRECATION") Notification.Builder(this)
         return b.setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(if (AppGraph.nav.isActive) "Going to ${AppGraph.nav.target?.name}" else getString(R.string.app_name))
+            .setContentTitle(when {
+                AppGraph.nav.isActive -> "Going to ${AppGraph.nav.target?.name}"
+                AppGraph.explore.active -> "Explore on"
+                AppGraph.settings.islandAlertsOn -> "Island alerts on"
+                else -> getString(R.string.app_name)
+            })
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(open)

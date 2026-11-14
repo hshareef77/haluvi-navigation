@@ -1,6 +1,15 @@
 package mv.haluvi.navigation.nav
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.os.SystemClock
+import mv.haluvi.navigation.AppGraph
+import mv.haluvi.navigation.R
+import mv.haluvi.navigation.ui.MainActivity
 import mv.haluvi.navigation.core.Geo
 import mv.haluvi.navigation.data.IslandShapes
 import mv.haluvi.navigation.data.Settings
@@ -18,6 +27,7 @@ import mv.haluvi.navigation.sensors.LocationTracker
  * Uses island outlines when downloaded (exact shore distance); otherwise island centre points.
  */
 class IslandWatcher(
+    private val context: Context,
     private val settings: Settings,
     private val shapes: IslandShapes,
     private val location: LocationTracker,
@@ -64,10 +74,20 @@ class IslandWatcher(
         return true
     }
 
+    /** True when the background Island alerts watch is the reason to listen (no trip, no Explore). */
+    fun alertsOnly(): Boolean = settings.islandAlertsOn && !nav.isActive && !exploreActive()
+
+    private var lastSeaMs = 0L
+
+    /** True when the last good position at sea was less than 10 minutes ago (keeps watching while the ferry docks). */
+    fun recentlyAtSea(): Boolean = lastSeaMs != 0L && now - lastSeaMs < 600_000
+
     private fun active(f: Fix): Boolean {
-        if (!settings.islandStopAnnouncementsOn) return false
-        if (nav.target?.kind == NavKind.ISLAND) return true
-        return exploreActive() && atSea(f)
+        if (atSea(f)) lastSeaMs = now
+        if (nav.target?.kind == NavKind.ISLAND) return settings.islandStopAnnouncementsOn
+        if (!(exploreActive() && settings.islandStopAnnouncementsOn) && !settings.islandAlertsOn) return false
+        // At sea, or docked at a harbour shortly after being at sea (so "Arrived at" can still be said).
+        return recentlyAtSea()
     }
 
     private fun onFix(f: Fix) {
@@ -132,6 +152,30 @@ class IslandWatcher(
     private fun announce(text: String, flush: Boolean) {
         lastMessage = text
         speaker.speak(text, flush = flush)
+        if (!AppGraph.uiVisible) notify(text)
+    }
+
+    private var notifyId = 100
+
+    /** Shows the announcement as a notification too, so it can be read later without opening the app. */
+    private fun notify(text: String) {
+        runCatching {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= 26) {
+                nm.createNotificationChannel(NotificationChannel("island_alerts", "Island alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "Approaching, arrived at and passing islands"
+                    setSound(null, null)
+                })
+            }
+            val open = PendingIntent.getActivity(context, 2, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(context, "island_alerts")
+            else @Suppress("DEPRECATION") android.app.Notification.Builder(context)
+            val n = b.setSmallIcon(R.drawable.ic_notification).setContentTitle(text).setContentText("Haluvi Navigation")
+                .setContentIntent(open).setAutoCancel(true).setWhen(System.currentTimeMillis()).setShowWhen(true).build()
+            notifyId = if (notifyId >= 120) 100 else notifyId + 1
+            nm.notify(notifyId, n)
+        }
     }
 
     fun reset() { visits.clear(); lastMessage = "" }

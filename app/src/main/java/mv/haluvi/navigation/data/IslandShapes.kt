@@ -17,46 +17,115 @@ import kotlin.math.sqrt
 class IslandShapes(context: Context, private val islands: IslandRepository) {
     private val file = File(context.filesDir, "island_shapes.json")
     @Volatile private var shapes: Map<String, List<LatLon>> = emptyMap()
+    /** Other named islands from OpenStreetMap (resorts, airports, uninhabited), keys start with "osm:". */
+    @Volatile var extras: List<Island> = emptyList(); private set
+    /** Name of the OpenStreetMap outline matched to each island (for the report). */
+    @Volatile private var osmNames: Map<String, String> = emptyMap()
+    /** Atoll codes downloaded completely. */
+    @Volatile var atollsDone: Set<String> = emptySet(); private set
+    /** Inhabited islands that were checked but have no outline on the map. */
+    @Volatile var notOnMap: Set<String> = emptySet(); private set
 
     init { load() }
 
-    val count: Int get() = shapes.size
+    /** Number of the 200 inhabited islands that have an outline. */
+    val count: Int get() = islands.allIslands.count { shapes.containsKey(it.key) }
     val isEmpty: Boolean get() = shapes.isEmpty()
     fun has(key: String) = shapes.containsKey(key)
+    fun ring(key: String): List<LatLon>? = shapes[key]
+    fun osmName(key: String): String? = osmNames[key]
 
     @Synchronized
     fun load() {
         if (!file.exists()) return
         runCatching {
             val o = JSONObject(file.readText())
-            val m = HashMap<String, List<LatLon>>()
-            o.keys().forEach { k ->
-                val arr = o.getJSONArray(k)
-                m[k] = (0 until arr.length()).map { i -> val p = arr.getJSONArray(i); LatLon(p.getDouble(0), p.getDouble(1)) }
+            if (!o.has("v")) {
+                // Version 2.2 format: { islandKey: [[lat, lon], ...] }
+                val m = HashMap<String, List<LatLon>>()
+                o.keys().forEach { k -> m[k] = readRing(o.getJSONArray(k)) }
+                shapes = m
+                return@runCatching
             }
-            shapes = m
+            val m = HashMap<String, List<LatLon>>()
+            val sh = o.getJSONObject("shapes")
+            sh.keys().forEach { k -> m[k] = readRing(sh.getJSONArray(k)) }
+            val ex = ArrayList<Island>()
+            o.optJSONArray("extras")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val e = arr.getJSONObject(i)
+                    ex.add(extraIsland(e.getString("key"), e.getString("name"), e.getDouble("lat"), e.getDouble("lon")))
+                }
+            }
+            val names = HashMap<String, String>()
+            o.optJSONObject("osmNames")?.let { n -> n.keys().forEach { k -> names[k] = n.getString(k) } }
+            shapes = m; extras = ex; osmNames = names
+            atollsDone = jsonSet(o.optJSONArray("atollsDone"))
+            notOnMap = jsonSet(o.optJSONArray("notOnMap"))
         }
     }
 
-    /** Adds or replaces outlines (key = island key) and saves to disk. */
+    private fun readRing(arr: JSONArray): List<LatLon> = (0 until arr.length()).map { i -> val p = arr.getJSONArray(i); LatLon(p.getDouble(0), p.getDouble(1)) }
+    private fun jsonSet(a: JSONArray?): Set<String> = if (a == null) emptySet() else (0 until a.length()).map { a.getString(it) }.toSet()
+
+    private fun extraIsland(key: String, name: String, lat: Double, lon: Double): Island =
+        Island(-1, -1, name, lat, lon).also { it.key = key }
+
+    /**
+     * Saves the result of one atoll: outlines of inhabited islands, other named islands,
+     * matched map names, and which inhabited islands are not on the map.
+     */
     @Synchronized
-    fun putAll(newShapes: Map<String, List<LatLon>>) {
+    fun putAtoll(atollCode: String, matched: Map<String, Pair<String, List<LatLon>>>, others: List<Pair<String, List<LatLon>>>, missing: Set<String>, atollIslandKeys: Set<String>) {
         val m = HashMap(shapes)
-        m.putAll(newShapes)
-        shapes = m
-        val o = JSONObject()
-        m.forEach { (k, pts) ->
+        val names = HashMap(osmNames)
+        matched.forEach { (k, v) -> m[k] = v.second; if (v.first.isNotBlank()) names[k] = v.first }
+        val ex = extras.filter { e -> others.none { o -> extraKey(o.first, o.second) == e.key } }.toMutableList()
+        others.forEach { (name, ring) ->
+            val key = extraKey(name, ring)
+            val c = centroid(ring)
+            m[key] = ring
+            ex.add(extraIsland(key, name, c.lat, c.lon))
+        }
+        shapes = m; osmNames = names; extras = ex
+        atollsDone = atollsDone + atollCode
+        notOnMap = (notOnMap - atollIslandKeys) + missing
+        save()
+    }
+
+    private fun extraKey(name: String, ring: List<LatLon>): String {
+        val c = centroid(ring)
+        return "osm:" + name + "@" + String.format(java.util.Locale.US, "%.3f,%.3f", c.lat, c.lon)
+    }
+
+    private fun save() {
+        val o = JSONObject().put("v", 2)
+        val sh = JSONObject()
+        shapes.forEach { (k, pts) ->
             val arr = JSONArray()
             pts.forEach { arr.put(JSONArray().put(round6(it.lat)).put(round6(it.lon))) }
-            o.put(k, arr)
+            sh.put(k, arr)
         }
-        file.writeText(o.toString())
+        o.put("shapes", sh)
+        val ex = JSONArray()
+        extras.forEach { ex.put(JSONObject().put("key", it.key).put("name", it.name).put("lat", it.lat).put("lon", it.lon)) }
+        o.put("extras", ex)
+        val n = JSONObject(); osmNames.forEach { (k, v) -> n.put(k, v) }
+        o.put("osmNames", n)
+        o.put("atollsDone", JSONArray(atollsDone.toList()))
+        o.put("notOnMap", JSONArray(notOnMap.toList()))
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        tmp.writeText(o.toString())
+        if (!tmp.renameTo(file)) { file.writeText(o.toString()); tmp.delete() }
     }
+
+    /** The whole file as text (for Export). */
+    fun exportText(): String = if (file.exists()) file.readText() else "{}"
 
     private fun round6(v: Double) = Math.round(v * 1e6) / 1e6
 
     @Synchronized
-    fun clear() { shapes = emptyMap(); file.delete() }
+    fun clear() { shapes = emptyMap(); extras = emptyList(); osmNames = emptyMap(); atollsDone = emptySet(); notOnMap = emptySet(); file.delete() }
 
     fun inside(key: String, lat: Double, lon: Double): Boolean {
         val ring = shapes[key] ?: return false
@@ -76,9 +145,15 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
 
     data class ShoreHit(val island: Island, val shore: Double, val centre: Double)
 
-    /** Islands whose centre is within [maxCentre] metres, with their shore distance, nearest shore first. */
-    fun nearby(lat: Double, lon: Double, maxCentre: Double = 20_000.0): List<ShoreHit> =
-        islands.within(lat, lon, maxCentre).map { ShoreHit(it.island, shoreDistance(it.island, lat, lon), it.distance) }.sortedBy { it.shore }
+    /** Inhabited and other named islands whose centre is within [maxCentre] metres, nearest shore first. */
+    fun nearby(lat: Double, lon: Double, maxCentre: Double = 20_000.0): List<ShoreHit> {
+        val list = islands.within(lat, lon, maxCentre).map { ShoreHit(it.island, shoreDistance(it.island, lat, lon), it.distance) }.toMutableList()
+        for (e in extras) {
+            val c = Geo.distance(lat, lon, e.lat, e.lon)
+            if (c <= maxCentre) list.add(ShoreHit(e, shoreDistance(e, lat, lon), c))
+        }
+        return list.sortedBy { it.shore }
+    }
 
     companion object {
         fun pointInRing(lat: Double, lon: Double, ring: List<LatLon>): Boolean {
@@ -124,5 +199,7 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
         }
 
         fun radius(ring: List<LatLon>): Double = sqrt(area(ring) / Math.PI)
+
+        fun centroid(ring: List<LatLon>): LatLon = LatLon(ring.sumOf { it.lat } / ring.size, ring.sumOf { it.lon } / ring.size)
     }
 }

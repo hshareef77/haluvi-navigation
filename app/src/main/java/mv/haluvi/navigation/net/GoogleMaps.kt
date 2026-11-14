@@ -22,6 +22,8 @@ data class OnlinePlace(
 
 data class RouteStep(
     val instruction: String,
+    /** "left" or "right" when Google says "Destination will be on the left/right" in this step. */
+    val destinationSide: String = "",
     val maneuver: String,
     val roadName: String,
     val distanceMeters: Double,
@@ -184,11 +186,11 @@ class GoogleMaps(private val keyProvider: () -> String) {
             for (i in 0 until arr.length()) {
                 val s = arr.getJSONObject(i)
                 val nav = s.optJSONObject("navigationInstruction")
-                val inst = cleanInstruction(nav?.optString("instructions").orEmpty())
+                val (inst, side) = splitDestinationSide(cleanInstruction(nav?.optString("instructions").orEmpty()))
                 val maneuver = nav?.optString("maneuver").orEmpty()
                 val poly = Geo.decodePolyline(s.optJSONObject("polyline")?.optString("encodedPolyline").orEmpty())
                 steps.add(RouteStep(
-                    instruction = inst.ifBlank { "Continue" }, maneuver = maneuver, roadName = roadFromInstruction(inst),
+                    instruction = inst.ifBlank { "Continue" }, destinationSide = side, maneuver = maneuver, roadName = roadFromInstruction(inst),
                     distanceMeters = s.optDouble("distanceMeters", 0.0), durationSeconds = parseDuration(s.optString("staticDuration")),
                     start = latLng(s.optJSONObject("startLocation")), end = latLng(s.optJSONObject("endLocation")), polyline = poly
                 ))
@@ -210,9 +212,9 @@ class GoogleMaps(private val keyProvider: () -> String) {
         val arr = leg.optJSONArray("steps") ?: JSONArray()
         val steps = (0 until arr.length()).map { i ->
             val s = arr.getJSONObject(i)
-            val inst = cleanInstruction(s.optString("html_instructions"))
+            val (inst, side) = splitDestinationSide(cleanInstruction(s.optString("html_instructions")))
             fun ll(name: String) = s.optJSONObject(name)?.let { LatLon(it.getDouble("lat"), it.getDouble("lng")) }
-            RouteStep(inst.ifBlank { "Continue" }, s.optString("maneuver"), roadFromInstruction(inst),
+            RouteStep(inst.ifBlank { "Continue" }, side, s.optString("maneuver"), roadFromInstruction(inst),
                 s.optJSONObject("distance")?.optDouble("value", 0.0) ?: 0.0,
                 s.optJSONObject("duration")?.optDouble("value", 0.0) ?: 0.0,
                 ll("start_location"), ll("end_location"),
@@ -282,6 +284,14 @@ class GoogleMaps(private val keyProvider: () -> String) {
                 .replace("&nbsp;", " ").replace("&amp;", "&").replace("\n", ". ")
             s = s.replace(Regex("\\s+"), " ").replace(Regex("\\s*\\.\\s*\\.+"), ".").trim()
             return s.trimEnd('.').trim()
+        }
+
+        private val DEST_SIDE = Regex("\\.?\\s*(?:Your )?destination (?:will be|is) on the (left|right)\\.?", RegexOption.IGNORE_CASE)
+
+        /** Removes "Destination will be on the left/right" from an instruction and returns the side separately. */
+        fun splitDestinationSide(inst: String): Pair<String, String> {
+            val m = DEST_SIDE.find(inst) ?: return inst to ""
+            return inst.replace(m.value, "").trim().trimEnd('.') to m.groupValues[1].lowercase()
         }
 
         private val INVALID_ROAD = setOf("left", "right", "straight", "destination", "the left", "the right", "your left", "your right")

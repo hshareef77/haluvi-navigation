@@ -134,10 +134,11 @@ class IslandsScreen : Screen() {
                 else -> { g.nav.start(Destination.of(dest)); host.showNavigation() }
             }
         }
+        islandAlertsToggle(this, ui)
         if (g.shapes.isEmpty) {
             ui.info("For exact island stop announcements, download the island outlines once.")
             ui.button("Download island outlines") { host.show { IslandOutlinesScreen() } }
-        }
+        } else ui.button("Island outlines") { host.show { IslandOutlinesScreen() } }
         ui.button("Back") { host.back() }
         return scroll
     }
@@ -150,9 +151,10 @@ class IslandsScreen : Screen() {
     override fun onSecond() { Selection.islandTo?.let { preview?.text = previewText(it) } }
 }
 
-/** One-time download of all inhabited island outlines from OpenStreetMap. */
+/** Download of island outlines from OpenStreetMap, with a clear status, missing list and report. */
 class IslandOutlinesScreen : Screen() {
     private var job: Job? = null
+    private var downloading = false
     private var progressView: TextView? = null
     private var progress = ""
 
@@ -160,27 +162,60 @@ class IslandOutlinesScreen : Screen() {
         val g = AppGraph
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title("Island outlines")
-        if (job?.isActive == true) {
+        if (downloading) {
             progressView = ui.info(progress)
-            ui.button("Cancel", color = UiColors.BUTTON_STOP) { job?.cancel(); progress = "Cancelled."; rebuild() }
+            ui.button("Cancel", color = UiColors.BUTTON_STOP) { job?.cancel() }
             return scroll
         }
         progressView = null
-        ui.info("${g.shapes.count} of ${g.islands.allIslands.size} islands have an outline. Outlines make island stop announcements exact. Download once; they then work offline.")
+        ui.info(if (g.shapes.isEmpty) "Outlines make island stop announcements exact. Download once; they then work offline."
+            else IslandShapeDownloader.summary().message())
         if (progress.isNotBlank()) ui.info(progress)
-        ui.button(if (g.shapes.isEmpty) "Download" else "Download again", color = UiColors.BUTTON_ON) { download() }
+        ui.button(if (g.shapes.isEmpty) "Download" else "Download missing", color = UiColors.BUTTON_ON) { download(full = false) }
+        val missing = IslandShapeDownloader.missingNames()
+        if (missing.isNotEmpty() && !g.shapes.isEmpty) {
+            ui.heading("Islands without an outline: ${missing.size}")
+            missing.take(50).forEach { ui.info(it) }
+        }
+        if (!g.shapes.isEmpty) {
+            ui.button("Share island report") { share(IslandShapeDownloader.report()) }
+            ui.button("Export outlines file") {
+                host.createFile("haluvi-island-outlines.json", "application/json") { uri ->
+                    if (uri == null) return@createFile
+                    host.scope.launch {
+                        val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            runCatching { host.contentResolver.openOutputStream(uri)?.use { it.write(g.shapes.exportText().toByteArray()) } }.isSuccess
+                        }
+                        host.speak(if (ok) "Exported." else "Export failed.")
+                    }
+                }
+            }
+            ui.button("Download everything again") { download(full = true) }
+        }
         ui.button("Back") { host.back() }
         return scroll
     }
 
-    private fun download() {
+    private fun share(text: String) {
+        val i = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+            .putExtra(android.content.Intent.EXTRA_SUBJECT, "Haluvi island outline report")
+            .putExtra(android.content.Intent.EXTRA_TEXT, text)
+        runCatching { host.startActivity(android.content.Intent.createChooser(i, "Share island report")) }
+    }
+
+    private fun download(full: Boolean) {
+        downloading = true
         progress = "Starting."
-        host.speak("Downloading island outlines. This takes a few minutes.")
+        host.speak("Downloading island outlines.")
         job = host.scope.launch {
-            val r = IslandShapeDownloader.downloadAll { p -> progress = p; progressView?.text = p }
-            progress = "Done. ${r.matched} of ${r.total} islands have an outline." +
-                if (r.failedAtolls > 0) " ${r.failedAtolls} atolls failed. Press Download again to retry." else ""
-            host.speak(progress)
+            val msg = try {
+                IslandShapeDownloader.download(full) { p -> progress = p; progressView?.text = p }.message()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                "Stopped. What was downloaded is kept. Press Download missing to continue."
+            }
+            downloading = false
+            progress = msg
+            host.speak(msg)
             if (host.currentScreen() === this@IslandOutlinesScreen) rebuild()
         }
         rebuild()
