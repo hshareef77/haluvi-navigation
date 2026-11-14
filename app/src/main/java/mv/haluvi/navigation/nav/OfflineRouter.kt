@@ -190,7 +190,7 @@ object OfflineRouter {
                 }
                 continue
             }
-            var action = word
+            var action: String = word
             val isLeft = angle < 0
             val passed = if (isLeft) sideCountLeft else sideCountRight
             if ((word == "turn left" || word == "turn right") && passed >= 1) {
