@@ -100,14 +100,27 @@ object OfflineMaps {
                 val atoll = g.islands.atolls[ai]
                 val prefix = if (byAtoll.size > 1) "Atoll $step of ${byAtoll.size}: " else ""
                 // 1. Island outlines for this atoll (needed to put places and roads on the right island).
-                if (atoll.code !in g.shapes.atollsDone || g.shapes.formatVersion in 1..4) {
-                    if (g.shapes.formatVersion in 1..4) g.shapes.clear()
-                    IslandShapeDownloader.ensureAtoll(atoll, prefix, onProgress)
-                }
+                // Outlines are replaced only when the new download succeeds (old ones keep working meanwhile).
+                if (atoll.code !in g.shapes.atollsDone) IslandShapeDownloader.ensureAtoll(atoll, prefix, onProgress)
                 // 2. Places and roads in one request each, for the box around the chosen islands.
-                onProgress(prefix + "${atoll.fullName}: places and roads.")
+                val what = if (group.size == 1) group[0].name else atoll.fullName
                 val box = boxFor(group)
-                val result = withRetry { withContext(Dispatchers.IO) { g.osm.placesInBox(box[0], box[1], box[2], box[3]) to g.osm.roadsInBox(box[0], box[1], box[2], box[3]) } }
+                val main = android.os.Handler(android.os.Looper.getMainLooper())
+                var head = ""
+                g.osm.onStatus = { msg -> main.post { onProgress("$head $msg") } }
+                val result = try {
+                    withRetry { attempt ->
+                        val tryText = if (attempt > 1) ", try $attempt of 3" else ""
+                        head = prefix + "$what: places$tryText."
+                        onProgress(head)
+                        val pl = withContext(Dispatchers.IO) { g.osm.placesInBox(box[0], box[1], box[2], box[3]) }
+                        head = prefix + "$what: ${pl.size} places received. Roads$tryText."
+                        onProgress(head)
+                        val rd = withContext(Dispatchers.IO) { g.osm.roadsInBox(box[0], box[1], box[2], box[3]) }
+                        onProgress(prefix + "$what: ${pl.size} places and ${rd.size} roads received. Saving.")
+                        pl to rd
+                    }
+                } finally { g.osm.onStatus = null }
                 if (result == null) { failed.add(atoll.fullName); continue }
                 val (placeList, roadList) = result
                 // 3. Put each place and road on its island.
@@ -146,14 +159,27 @@ object OfflineMaps {
         } finally {
             running = false
         }
-        return "Done. $done islands: $places places and $roads roads saved for offline use." +
-            if (failed.isNotEmpty()) " Could not download: ${failed.joinToString(", ")}. Press the download again to retry." else ""
+        val detail = if (islands.size == 1 && done == 1) {
+            val isl = islands[0]
+            val rs = g.store.loadRoads(isl.key)
+            var km = 0.0
+            rs.forEach { r -> for (i in 0 until r.points.size - 1) km += Geo.distance(r.points[i][0], r.points[i][1], r.points[i + 1][0], r.points[i + 1][1]) / 1000 }
+            val (parts, share) = connectivity(rs)
+            val conn = when {
+                rs.isEmpty() -> "no roads on the map"
+                parts == 1 -> "all connected"
+                else -> "$parts separate parts, the largest is ${(share * 100).toInt()} percent"
+            }
+            "Done. ${isl.name}: $places places, $roads roads, ${String.format(Locale.US, "%.1f", km)} kilometers of roads, $conn."
+        } else "Done. $done islands: $places places and $roads roads saved for offline use."
+        return detail + if (failed.isNotEmpty()) " Failed, map server busy or no internet: ${failed.joinToString(", ")}. Press the download again to retry." else ""
     }
 
-    private suspend fun <T> withRetry(block: suspend () -> T): T? {
+    private suspend fun <T> withRetry(block: suspend (attempt: Int) -> T): T? {
         for (attempt in 1..3) {
-            try { return block() } catch (e: Exception) {
+            try { return block(attempt) } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                currentCoroutineContext().ensureActive()
                 delay(5000L * attempt)
             }
         }

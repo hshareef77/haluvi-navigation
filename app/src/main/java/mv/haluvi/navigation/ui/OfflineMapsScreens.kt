@@ -17,6 +17,15 @@ object OfflineDownload {
     var progress = ""
     var lastResult = ""
     val active: Boolean get() = job?.isActive == true
+
+    /** Stops at once: closes the open server connection instead of waiting for its answer. */
+    fun cancel(host: MainActivity) {
+        job?.cancel()
+        mv.haluvi.navigation.net.Http.cancelAll()
+        progress = "Stopping."
+        (host.currentScreen() as? OfflineProgressView)?.showProgress(progress)
+        host.say("Stopping")
+    }
 }
 
 fun shareText(host: MainActivity, subject: String, text: String) {
@@ -57,7 +66,7 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
         titleView = ui.title("Offline maps")
         if (OfflineDownload.active) {
             progressView = ui.info(OfflineDownload.progress)
-            ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.job?.cancel() }
+            ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
             ui.button("Back") { host.back() }
             return scroll
         }
@@ -102,7 +111,7 @@ class OfflineAtollScreen(private val atoll: Atoll) : Screen(), OfflineProgressVi
         titleView = ui.title(atoll.fullName)
         if (OfflineDownload.active) {
             progressView = ui.info(OfflineDownload.progress)
-            ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.job?.cancel() }
+            ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
             ui.button("Back") { host.back() }
             return scroll
         }
@@ -132,7 +141,7 @@ class OfflineIslandScreen(private val island: Island) : Screen(), OfflineProgres
         titleView = ui.title(island.fullName)
         if (OfflineDownload.active) {
             progressView = ui.info(OfflineDownload.progress)
-            ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.job?.cancel() }
+            ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
             ui.button("Back") { host.back() }
             return scroll
         }

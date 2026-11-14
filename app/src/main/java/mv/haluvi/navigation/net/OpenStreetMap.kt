@@ -62,13 +62,23 @@ class OpenStreetMap {
         else -> listOf("[\"name\"][\"amenity\"]", "[\"name\"][\"shop\"]", "[\"name\"][\"tourism\"]", "[\"name\"][\"public_transport\"]", "[\"name\"][\"leisure\"]", "[\"name\"][\"office\"]", "[\"name\"][\"building\"]")
     }
 
+    /** Optional progress messages ("Asking map server 2 of 3"), set by downloads. Called on a background thread. */
+    @Volatile var onStatus: ((String) -> Unit)? = null
+
     private fun overpass(query: String): String {
         var last: Exception? = null
-        for (server in overpassServers) {
+        val started = System.currentTimeMillis()
+        for ((i, server) in overpassServers.withIndex()) {
+            if (Http.cancelledSince(started)) throw java.io.IOException("Cancelled")
+            onStatus?.invoke("Asking map server ${i + 1} of ${overpassServers.size}.")
             try {
-                return Http.post(server, "data=" + Http.enc(query), "application/x-www-form-urlencoded", connectMs = 10000, readMs = 40000)
+                val text = Http.post(server, "data=" + Http.enc(query), "application/x-www-form-urlencoded", connectMs = 8000, readMs = 30000)
+                onStatus?.invoke("Received answer from map server ${i + 1}.")
+                return text
             } catch (e: Exception) {
                 last = e
+                if (Http.cancelledSince(started)) throw e
+                onStatus?.invoke("Map server ${i + 1} is busy or not answering.")
             }
         }
         throw last ?: IllegalStateException("OpenStreetMap is not available")

@@ -95,6 +95,8 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
             notOnMap = jsonSet(o.optJSONArray("notOnMap"))
             airportIslands = jsonSet(o.optJSONArray("airportIslands"))
         }
+        // Outlines made with older rules keep working, but every atoll is marked for update.
+        if (formatVersion in 1..4) atollsDone = emptySet()
         removeDuplicateExtras()
     }
 

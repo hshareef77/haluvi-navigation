@@ -23,18 +23,32 @@ object IslandShapeDownloader {
 
     data class AtollResult(val atoll: Atoll, val found: Int, val failed: Boolean)
 
-    data class Result(val withOutline: Int, val total: Int, val failedAtolls: List<String>, val missing: List<String>, val extras: Int) {
-        /** Clear spoken summary with names. */
+    /** Atolls that failed in the last download (map server busy or no internet). */
+    @Volatile var lastFailed: List<String> = emptyList()
+        private set
+
+    data class Result(
+        val withOutline: Int,
+        val total: Int,
+        val failedAtolls: List<String>,
+        val missing: List<String>,
+        val extras: Int,
+        /** Atolls not downloaded yet, or downloaded with older rules and waiting for an update. */
+        val notYet: List<String> = emptyList()
+    ) {
+        /** Clear spoken summary with names. Says "failed" only for atolls that really failed. */
         fun message(): String {
             val parts = arrayListOf("$withOutline of $total inhabited islands have an outline.")
             if (missing.isNotEmpty()) parts.add("Not on the map: ${missing.joinToString(", ")}. These use the island centre point.")
-            parts.add(if (failedAtolls.isEmpty()) "All atolls downloaded." else "Could not download: ${failedAtolls.joinToString(", ")}. Press Download to try again.")
-            if (extras > 0) parts.add("$extras other named islands, such as resorts, were also added.")
+            if (failedAtolls.isNotEmpty()) parts.add("Failed, map server busy or no internet: ${failedAtolls.joinToString(", ")}. Press Download missing to try again.")
+            if (notYet.isNotEmpty()) parts.add("Not downloaded yet or waiting for update: ${if (notYet.size > 6) "${notYet.size} atolls" else notYet.joinToString(", ")}.")
+            if (failedAtolls.isEmpty() && notYet.isEmpty()) parts.add("All atolls downloaded.")
+            if (extras > 0) parts.add("$extras other named islands, such as resorts.")
             return parts.joinToString(" ")
         }
     }
 
-    /** Islands of the 200 without an outline, as "Name, Atoll" (those not yet downloaded or not on the map). */
+    /** Inhabited islands without an outline, as "Name, Atoll". */
     fun missingNames(): List<String> {
         val g = AppGraph
         return g.islands.allIslands.filter { !g.shapes.has(it.key) }.map { "${it.name}, ${it.atollFullName}" }
@@ -42,39 +56,50 @@ object IslandShapeDownloader {
 
     fun summary(): Result {
         val g = AppGraph
-        val failed = g.islands.atolls.filter { it.code !in g.shapes.atollsDone }.map { it.fullName }
+        val failed = lastFailed
+        val notYet = g.islands.atolls.filter { it.code !in g.shapes.atollsDone && it.fullName !in failed }.map { it.fullName }
         val missing = g.islands.allIslands.filter { it.key in g.shapes.notOnMap && !g.shapes.has(it.key) }.map { it.name }
-        return Result(g.shapes.count, g.islands.allIslands.size, failed, missing, g.shapes.extras.size)
+        return Result(g.shapes.count, g.islands.allIslands.size, failed, missing, g.shapes.extras.size, notYet)
     }
 
+    /**
+     * Downloads outlines for atolls that are missing, failed or made with older rules ([full]: all atolls).
+     * Existing outlines are never deleted in advance: each atoll is replaced only when its new download succeeds.
+     */
     suspend fun download(full: Boolean, onProgress: (String) -> Unit): Result {
         val g = AppGraph
         running = true
         val failed = ArrayList<String>()
         try {
-            // Outlines from version 2.3 or older were matched with older rules: download them all again.
-            if (full || g.shapes.formatVersion in 1..4) g.shapes.clear()
-            val todo = g.islands.atolls.filter { a -> a.code !in g.shapes.atollsDone || a.islands.any { !g.shapes.has(it.key) && it.key !in g.shapes.notOnMap } }
+            val todo = g.islands.atolls.filter { a -> full || a.code !in g.shapes.atollsDone || a.islands.any { !g.shapes.has(it.key) && it.key !in g.shapes.notOnMap } }
             if (todo.isEmpty()) onProgress("Everything is already downloaded.")
             for ((i, atoll) in todo.withIndex()) {
                 currentCoroutineContext().ensureActive()
                 if (!ensureAtoll(atoll, "Atoll ${i + 1} of ${todo.size}: ", onProgress)) failed.add(atoll.fullName)
+                lastFailed = failed.toList()
             }
         } finally {
             running = false
         }
-        return summary().copy(failedAtolls = failed.ifEmpty { summary().failedAtolls })
+        lastFailed = failed
+        return summary()
     }
 
     /** Downloads and matches one atoll's outlines (tries up to 3 times). Returns false if it failed. */
     suspend fun ensureAtoll(atoll: Atoll, prefix: String, onProgress: (String) -> Unit): Boolean {
         val g = AppGraph
         for (attempt in 1..3) {
-            onProgress(prefix + "${atoll.fullName} island outlines" + if (attempt > 1) ", try $attempt." else ".")
-            val m = withContext(Dispatchers.IO) { runCatching { matchAtoll(atoll) } }.getOrNull()
+            val head = prefix + "${atoll.fullName} island outlines" + if (attempt > 1) ", try $attempt of 3" else ""
+            onProgress("$head.")
+            val main = android.os.Handler(android.os.Looper.getMainLooper())
+            g.osm.onStatus = { msg -> main.post { onProgress("$head. $msg") } }
+            val m = try {
+                withContext(Dispatchers.IO) { runCatching { matchAtoll(atoll) } }.getOrNull()
+            } finally { g.osm.onStatus = null }
             if (m != null) {
                 g.shapes.putAtoll(m)
-                onProgress("${atoll.fullName}: ${m.islandRing.size} of ${atoll.islands.size} islands found.")
+                onProgress("${atoll.fullName}: ${m.islandRing.size} of ${atoll.islands.size} island outlines found.")
+                lastFailed = lastFailed - atoll.fullName
                 return true
             }
             delay(4000L * attempt)

@@ -11,6 +11,19 @@ class HttpException(val code: Int, val body: String, message: String) : IOExcept
 
 /** Small blocking HTTP helper. Always call from a background dispatcher. */
 object Http {
+    /** Open connections, so a Cancel button can stop a download at once. */
+    private val active = java.util.Collections.synchronizedSet(HashSet<HttpURLConnection>())
+    @Volatile private var cancelledAt = 0L
+
+    /** Closes every open connection immediately (the waiting request then fails at once). */
+    fun cancelAll() {
+        cancelledAt = System.currentTimeMillis()
+        synchronized(active) { active.toList() }.forEach { runCatching { it.disconnect() } }
+    }
+
+    /** True when [cancelAll] was called after [sinceMs]. */
+    fun cancelledSince(sinceMs: Long) = cancelledAt >= sinceMs
+
     private const val USER_AGENT = "HaluviNavigation/2.0 (Android accessible navigation app)"
 
     fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
@@ -23,6 +36,7 @@ object Http {
 
     private fun request(method: String, url: String, body: String?, headers: Map<String, String>, connectMs: Int, readMs: Int): String {
         val conn = URL(url).openConnection() as HttpURLConnection
+        active.add(conn)
         try {
             conn.requestMethod = method
             conn.connectTimeout = connectMs
@@ -41,6 +55,7 @@ object Http {
             if (code !in 200..299) throw HttpException(code, text, "Server response $code")
             return text
         } finally {
+            active.remove(conn)
             conn.disconnect()
         }
     }
