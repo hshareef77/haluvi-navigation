@@ -16,7 +16,7 @@ import kotlin.math.sqrt
  *  - Wrong island positions in the built-in data are corrected from the matched outline.
  *  - Other named islands (resorts, airports, uninhabited) are kept as extra islands.
  */
-class IslandShapes(context: Context, private val islands: IslandRepository) {
+class IslandShapes(private val context: Context, private val islands: IslandRepository) {
     private val file = File(context.filesDir, "island_shapes.json")
 
     @Volatile private var rings: Map<String, List<LatLon>> = emptyMap()
@@ -39,7 +39,7 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
     /** Built-in positions, kept so corrections can be re-applied or undone. */
     private val original: Map<String, LatLon> = islands.allIslands.associate { it.key to LatLon(it.lat, it.lon) }
 
-    init { load(); applyCorrections() }
+    init { load(); mergeBuiltin(); applyCorrections() }
 
     val count: Int get() = islands.allIslands.count { has(it.key) }
     val isEmpty: Boolean get() = islandRing.isEmpty()
@@ -123,6 +123,57 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
         if (file.exists() && formatVersion >= 3) runCatching { save() }
     }
 
+    /**
+     * The app ships with outlines for all inhabited islands (from OpenStreetMap, checked with the island
+     * reports). New users get them at once without downloading; missing islands are filled in for everyone.
+     * Downloads made with older rules (before 2.6) are replaced by the built-in outlines.
+     */
+    @Synchronized
+    private fun mergeBuiltin() {
+        val o = runCatching { JSONObject(context.assets.open("island_outlines_builtin.json").bufferedReader().use { it.readText() }) }.getOrNull() ?: return
+        val replaceAll = formatVersion in 0..4
+        val bRings = HashMap<String, List<LatLon>>()
+        o.getJSONObject("rings").let { rj -> rj.keys().forEach { k -> bRings["b:$k"] = readRing(rj.getJSONArray(k)) } }
+        val bIsland = HashMap<String, String>()
+        o.getJSONObject("islandRing").let { ij -> ij.keys().forEach { k -> bIsland[k] = "b:" + ij.getString(k) } }
+        val bNames = readMap(o.optJSONObject("osmNames")); val bMethods = readMap(o.optJSONObject("methods")); val bWarn = readMap(o.optJSONObject("warnings"))
+
+        val r = HashMap<String, List<LatLon>>(); if (!replaceAll) r.putAll(rings)
+        val ir = HashMap<String, String>(); if (!replaceAll) ir.putAll(islandRing)
+        val names = HashMap<String, String>(); if (!replaceAll) names.putAll(osmNames)
+        val meth = HashMap<String, String>(); if (!replaceAll) meth.putAll(methods)
+        val warn = HashMap<String, String>(); if (!replaceAll) warn.putAll(warnings)
+        var added = 0
+        for (isl in islands.allIslands) {
+            if (ir.containsKey(isl.key)) continue
+            val rid = bIsland[isl.key] ?: continue
+            val ring = bRings[rid] ?: continue
+            r[rid] = ring; ir[isl.key] = rid; added++
+            bNames[isl.key]?.let { names[isl.key] = it }; bMethods[isl.key]?.let { meth[isl.key] = it }; bWarn[isl.key]?.let { warn[isl.key] = it }
+        }
+        val ex = ArrayList<Island>(); if (!replaceAll) ex.addAll(extras)
+        o.optJSONArray("extras")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val e = arr.getJSONObject(i)
+                val key = e.getString("key")
+                if (ex.any { it.key == key || (it.name.equals(e.getString("name"), true) && Geo.distance(it.lat, it.lon, e.getDouble("lat"), e.getDouble("lon")) < 3000) }) continue
+                val ring = bRings["b:$key"] ?: continue
+                r[key] = ring; ir[key] = key
+                ex.add(extraIsland(key, e.getString("name"), e.getDouble("lat"), e.getDouble("lon"), e.optString("type", "island")))
+                added++
+            }
+        }
+        if (added == 0 && !replaceAll) return
+        rings = r; islandRing = ir; osmNames = names; methods = meth; warnings = warn; extras = ex
+        if (replaceAll) { corrected = emptyMap(); correctedBy = emptyMap() }
+        // An atoll counts as done when all its islands have an outline.
+        atollsDone = (if (replaceAll) emptySet() else atollsDone) + islands.atolls.filter { a -> a.islands.all { ir.containsKey(it.key) } }.map { it.code }
+        airportIslands = airportIslands + jsonSet(o.optJSONArray("airportIslands"))
+        formatVersion = 5
+        removeDuplicateExtras()
+        runCatching { save() }
+    }
+
     /** All airport islands: other islands typed airport, and inhabited islands with an airport. */
     fun airports(): List<Island> = extras.filter { it.type == "airport" } + islands.allIslands.filter { it.hasAirport }
 
@@ -137,7 +188,7 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
     /** Moves islands with a corrected position to the middle of their real outline. */
     private fun applyCorrections() {
         for (isl in islands.allIslands) {
-            isl.hasAirport = isl.key in airportIslands
+            isl.hasAirport = isl.key in airportIslands || isl.key in KNOWN_AIRPORT_ISLANDS
             val c = corrected[isl.key] ?: original[isl.key] ?: continue
             isl.lat = c.lat; isl.lon = c.lon
         }
@@ -280,6 +331,9 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
     }
 
     companion object {
+        /** Inhabited islands with an airport (local knowledge; map data may miss some). */
+        val KNOWN_AIRPORT_ISLANDS = setOf("HDh:Hanimadhoo", "Dh:Kudahuvadhoo", "Th:Thimarafushi", "Gn:Fuvahmulah", "B:Dharavandhoo", "ADh:Maamigili")
+
         /**
          * Normalizes Dhivehi island-name spellings so variants match:
          * Dhidhoo / Dhidhdhoo, Kurinbee / Kurinbi, Kimbidhoo / Kinbidhoo, Hon'daidhoo, Male' / Malé.

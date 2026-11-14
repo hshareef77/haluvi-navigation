@@ -65,24 +65,40 @@ class OpenStreetMap {
     /** Optional progress messages ("Asking map server 2 of 3"), set by downloads. Called on a background thread. */
     @Volatile var onStatus: ((String) -> Unit)? = null
 
-    private fun overpass(query: String): String {
+    /**
+     * Sends a query to the Overpass servers, one after another. [readSeconds]: how long one server may
+     * take (big requests like an atoll's outlines need longer). While waiting, [onStatus] gets
+     * "Waiting for map server 1, 40 seconds" every 10 seconds.
+     */
+    private fun overpass(query: String, readSeconds: Int = 30): String {
         var last: Exception? = null
         val started = System.currentTimeMillis()
         for ((i, server) in overpassServers.withIndex()) {
             if (Http.cancelledSince(started)) throw java.io.IOException("Cancelled")
             onStatus?.invoke("Asking map server ${i + 1} of ${overpassServers.size}.")
+            val askedAt = System.currentTimeMillis()
+            val timer = java.util.Timer(true)
+            timer.scheduleAtFixedRate(object : java.util.TimerTask() {
+                override fun run() {
+                    val secs = ((System.currentTimeMillis() - askedAt) / 1000).toInt()
+                    onStatus?.invoke("Waiting for map server ${i + 1}, $secs seconds.")
+                }
+            }, 10_000L, 10_000L)
             try {
-                val text = Http.post(server, "data=" + Http.enc(query), "application/x-www-form-urlencoded", connectMs = 8000, readMs = 30000)
+                val text = Http.post(server, "data=" + Http.enc(query), "application/x-www-form-urlencoded", connectMs = 10000, readMs = readSeconds * 1000)
                 onStatus?.invoke("Received answer from map server ${i + 1}.")
                 return text
             } catch (e: Exception) {
                 last = e
                 if (Http.cancelledSince(started)) throw e
                 onStatus?.invoke("Map server ${i + 1} is busy or not answering.")
+            } finally {
+                timer.cancel()
             }
         }
         throw last ?: IllegalStateException("OpenStreetMap is not available")
     }
+
 
     /** Places around a point. [keyword] filters by name when the query is not a known category. */
     fun searchNearby(text: String, lat: Double, lon: Double, radius: Int): List<OnlinePlace> {
@@ -215,7 +231,7 @@ class OpenStreetMap {
             ");out geom tags;" +
             "(node[\"place\"~\"^(island|islet|city|town|village|hamlet)$\"]($bbox);" +
             "nwr[\"tourism\"~\"^(resort|hotel)$\"]($bbox);nwr[\"aeroway\"=\"aerodrome\"]($bbox););out center tags;"
-        val arr = JSONObject(overpass(q)).optJSONArray("elements") ?: return emptyList()
+        val arr = JSONObject(overpass(q, readSeconds = 90)).optJSONArray("elements") ?: return emptyList()
         fun geom(a: JSONArray?): List<LatLon> {
             if (a == null) return emptyList()
             return (0 until a.length()).mapNotNull { j -> a.optJSONObject(j)?.let { LatLon(it.getDouble("lat"), it.getDouble("lon")) } }
@@ -378,7 +394,7 @@ class OpenStreetMap {
             "[\"office\"][\"name\"]", "[\"man_made\"=\"pier\"]", "[\"public_transport\"]", "[\"building\"=\"mosque\"]", "[\"craft\"][\"name\"]"
         )
         val q = "[out:json][timeout:180];(" + f.joinToString("") { "node$b$it;way$b$it;" } + ");out center tags;"
-        val arr = JSONObject(overpass(q)).optJSONArray("elements") ?: return emptyList()
+        val arr = JSONObject(overpass(q, readSeconds = 60)).optJSONArray("elements") ?: return emptyList()
         val out = ArrayList<MapPlace>()
         val seen = HashSet<String>()
         for (i in 0 until arr.length()) {
@@ -421,7 +437,7 @@ class OpenStreetMap {
     /** All roads and paths inside a box (with geometry), for offline road names, intersections and routing. */
     fun roadsInBox(south: Double, west: Double, north: Double, east: Double): List<DownloadedRoad> {
         val q = "[out:json][timeout:180];way($south,$west,$north,$east)[\"highway\"~\"^(primary|secondary|tertiary|unclassified|residential|living_street|service|pedestrian|footway|path|track|road|steps|cycleway)$\"];out geom tags;"
-        val arr = JSONObject(overpass(q)).optJSONArray("elements") ?: return emptyList()
+        val arr = JSONObject(overpass(q, readSeconds = 60)).optJSONArray("elements") ?: return emptyList()
         val out = ArrayList<DownloadedRoad>()
         for (i in 0 until arr.length()) {
             val e = arr.getJSONObject(i)

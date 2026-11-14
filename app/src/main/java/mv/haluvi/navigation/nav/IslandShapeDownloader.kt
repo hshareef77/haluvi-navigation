@@ -93,8 +93,9 @@ object IslandShapeDownloader {
             onProgress("$head.")
             val main = android.os.Handler(android.os.Looper.getMainLooper())
             g.osm.onStatus = { msg -> main.post { onProgress("$head. $msg") } }
+            // From the second try, ask in two smaller halves: busy servers answer small requests more easily.
             val m = try {
-                withContext(Dispatchers.IO) { runCatching { matchAtoll(atoll) } }.getOrNull()
+                withContext(Dispatchers.IO) { runCatching { matchAtoll(atoll, split = attempt >= 2) } }.getOrNull()
             } finally { g.osm.onStatus = null }
             if (m != null) {
                 g.shapes.putAtoll(m)
@@ -114,7 +115,7 @@ object IslandShapeDownloader {
      *  3. the nearest outline within 1.5 km that no other island uses and that has no other island's name;
      *  4. otherwise no outline: the island keeps its centre point and is marked in the report.
      */
-    private fun matchAtoll(atoll: Atoll): IslandShapes.AtollData {
+    private fun matchAtoll(atoll: Atoll, split: Boolean = false): IslandShapes.AtollData {
         val g = AppGraph
         val pad = 0.12 // about 13 km around the atoll's inhabited islands: covers resorts and airports of the atoll
         val pos = atoll.islands.associate { it.key to (g.shapes.originalPosition(it.key) ?: LatLon(it.lat, it.lon)) }
@@ -122,7 +123,18 @@ object IslandShapeDownloader {
         val n = pos.values.maxOf { it.lat } + pad
         val w = pos.values.minOf { it.lon } - pad
         val e = pos.values.maxOf { it.lon } + pad
-        val outlines = g.osm.islandOutlines(s, w, n, e)
+        val outlines = if (!split) g.osm.islandOutlines(s, w, n, e) else {
+            // Two halves (south and north) that overlap a little, merged without duplicates.
+            val mid = (s + n) / 2
+            val parts = g.osm.islandOutlines(s, w, mid + 0.02, e) + g.osm.islandOutlines(mid - 0.02, w, n, e)
+            val merged = ArrayList<mv.haluvi.navigation.net.OpenStreetMap.Outline>()
+            for (o in parts) {
+                val c = IslandShapes.centroid(o.ring)
+                val dup = merged.indexOfFirst { m -> IslandShapes.centroid(m.ring).let { Geo.distance(it.lat, it.lon, c.lat, c.lon) < 30 } }
+                if (dup < 0) merged.add(o) else if (o.ring.size > merged[dup].ring.size) merged[dup] = o
+            }
+            merged
+        }
         val ringIdOf = HashMap<Int, String>()
         fun ringId(i: Int) = ringIdOf.getOrPut(i) { "ring:${atoll.code}:$i" }
 

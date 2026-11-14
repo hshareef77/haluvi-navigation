@@ -39,6 +39,7 @@ class MyPlacesScreen(
         if (!forGoTo) {
             ui.button("Save this place") { host.show { SavePlaceScreen() } }
             ui.button("Offline maps") { host.show { OfflineMapsScreen() } }
+            ui.button("Get Google places") { host.show { GooglePlacesScreen() } }
         }
         val edit = ui.edit("Find in my places", query) { query = it.trim(); limit = 40; rebuild() }
         ui.row("Find" to { query = edit.text.toString().trim(); limit = 40; rebuild() }, "Clear" to { query = ""; rebuild() })
@@ -194,6 +195,8 @@ class EditPlaceScreen(private val id: String) : Screen() {
 
 /** Online search. Uses Google when a key is set, otherwise (or if Google fails) OpenStreetMap. */
 class SearchScreen : Screen() {
+    /** Island to search on; null = the island I am on. */
+    private var area: Island? = null
     private var query = ""
     private var results: List<OnlinePlace> = emptyList()
     private var searching = false
@@ -203,6 +206,14 @@ class SearchScreen : Screen() {
     override fun create(): View {
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title("Search")
+        ui.button("Search in: " + (area?.let { if (it.type == "inhabited") it.fullName else it.spokenName } ?: "my island")) {
+            host.show {
+                ChoiceScreen("Search in", null, listOf(
+                    "My island" to { area = null; host.backTo(this@SearchScreen) },
+                    "Choose island" to { host.show { AtollPickerScreen { isl -> area = isl; host.say("Search in ${isl.name}"); host.backTo(this@SearchScreen) } } }
+                ))
+            }
+        }
         val edit = ui.edit("Place name", query) { search(it) }
         ui.button("Search") { search(edit.text.toString()) }
         ui.row("Mosque" to { search("mosque") }, "Health" to { search("hospital clinic pharmacy") }, "Shop" to { search("shop supermarket") })
@@ -233,20 +244,26 @@ class SearchScreen : Screen() {
         host.speak("Searching.")
         val g = AppGraph
         val f = g.location.fix
-        val island = f?.let { g.islands.nearest(it.lat, it.lon)?.island?.name }
+        val chosen = area
+        // Search centre: the chosen island, or my position.
+        val cLat = chosen?.lat ?: f?.lat
+        val cLon = chosen?.lon ?: f?.lon
+        val island = chosen?.name ?: f?.let { g.islands.nearest(it.lat, it.lon)?.island?.name }
         job?.cancel()
         job = host.scope.launch {
             val list = withContext(Dispatchers.IO) {
-                var out: List<OnlinePlace> = emptyList()
+                // Google (online, with a key) and OpenStreetMap together, without duplicates.
+                val out = LinkedHashMap<String, OnlinePlace>()
                 var err: Throwable? = null
                 if (g.settings.googleReady) {
                     val gq = if (island != null) "$q, $island, Maldives" else "$q, Maldives"
-                    runCatching { g.google.searchText(gq, f?.lat, f?.lon, 5000) }.onSuccess { out = it }.onFailure { err = it }
+                    runCatching { g.google.searchText(gq, cLat, cLon, if (chosen != null) 3000 else 5000) }
+                        .onSuccess { l -> l.forEach { out.putIfAbsent(it.key, it) } }.onFailure { err = it }
                 }
-                if (out.isEmpty()) {
-                    runCatching { g.osm.search(q, f?.lat, f?.lon, island, wide = false) }.onSuccess { out = it; err = null }.onFailure { if (err == null) err = it }
-                }
-                out to err
+                runCatching { g.osm.search(q, cLat, cLon, island, wide = false) }
+                    .onSuccess { l -> l.forEach { p -> if (out.values.none { o -> o.name.equals(p.name, true) && Geo.distance(o.lat, o.lon, p.lat, p.lon) < 50 }) out.putIfAbsent(p.key, p) } }
+                    .onFailure { if (out.isEmpty() && err == null) err = it }
+                out.values.toList() to (if (out.isEmpty()) err else null)
             }
             searching = false
             val (places, err) = list
