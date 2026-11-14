@@ -53,7 +53,7 @@ object IslandShapeDownloader {
         val failed = ArrayList<String>()
         try {
             // Outlines from version 2.3 or older were matched with older rules: download them all again.
-            if (full || g.shapes.formatVersion in 1..2) g.shapes.clear()
+            if (full || g.shapes.formatVersion in 1..3) g.shapes.clear()
             val todo = g.islands.atolls.filter { a -> a.code !in g.shapes.atollsDone || a.islands.any { !g.shapes.has(it.key) && it.key !in g.shapes.notOnMap } }
             if (todo.isEmpty()) onProgress("Everything is already downloaded.")
             for ((i, atoll) in todo.withIndex()) {
@@ -120,19 +120,39 @@ object IslandShapeDownloader {
             return if (IslandShapes.pointInRing(p.lat, p.lon, r)) 0.0 else Geo.distanceToPolyline(p.lat, p.lon, r + r.first())
         }
 
-        // Pass 1: by name, then inside.
+        // Built-in positions that are identical to another island's are wrong copies (e.g. Maathoda = Thinadhoo).
+        val suspect = atoll.islands.filter { a -> atoll.islands.any { b -> b !== a && pos.getValue(a.key).let { pa -> pos.getValue(b.key).let { pb -> Geo.distance(pa.lat, pa.lon, pb.lat, pb.lon) < 20 } } } }.map { it.key }.toSet()
+        for (k in suspect) warnings[k] = "built-in position is the same as another island's - " + "position taken from the map instead"
+
+        // Names an outline answers to: its own name, each word of it ("Fares Maathodaa"), and villages inside it.
+        fun exactName(idx: Int, name: String) = IslandShapes.sameName(outlines[idx].name, name)
+        fun partName(idx: Int, name: String): Boolean {
+            val o = outlines[idx]
+            val words = o.name.split(Regex("[^\\p{L}']+")).filter { it.length >= 4 }
+            return (words.size > 1 && words.any { IslandShapes.sameName(it, name) }) || o.places.any { IslandShapes.sameName(it.name, name) }
+        }
+        /** Best position for an island on a matched outline: its village point if the map has one, else the outline middle. */
+        fun placeOn(idx: Int, name: String): LatLon {
+            val o = outlines[idx]
+            return o.places.firstOrNull { IslandShapes.sameName(it.name, name) }?.let { LatLon(it.lat, it.lon) } ?: IslandShapes.centroid(o.ring)
+        }
+
+        // Pass 1: by name (whole name first, then a word of a joined island's name or a village inside), then inside.
         for (island in atoll.islands) {
             val p = pos.getValue(island.key)
-            val byName = outlines.indices.filter { IslandShapes.sameName(outlines[it].name, island.name) }
-                .map { it to distTo(p, it) }.filter { it.second <= 8000 }.minByOrNull { it.second }
+            val maxD = if (island.key in suspect) 60_000.0 else 8_000.0
+            val byName = (outlines.indices.filter { exactName(it, island.name) }.takeIf { it.isNotEmpty() }
+                ?: outlines.indices.filter { partName(it, island.name) })
+                .map { it to distTo(p, it) }.filter { it.second <= maxD }.minByOrNull { it.second }
             if (byName != null) {
                 assign(island.key, byName.first, "name")
-                if (byName.second > 150) {
-                    val c = IslandShapes.centroid(outlines[byName.first].ring)
+                if (byName.second > 150 || island.key in suspect) {
+                    val c = placeOn(byName.first, island.name)
                     corrected[island.key] = c to Geo.distance(p.lat, p.lon, c.lat, c.lon)
                 }
                 continue
             }
+            if (island.key in suspect) continue // never trust a copied position for "inside" matching
             val containing = outlines.indices.filter { IslandShapes.pointInRing(p.lat, p.lon, outlines[it].ring) }
                 .minByOrNull { IslandShapes.area(outlines[it].ring) }
             if (containing != null) assign(island.key, containing, "inside")
@@ -140,7 +160,7 @@ object IslandShapeDownloader {
         // Pass 2: nearest unused outline without another island's name.
         val atollNames = atoll.islands.map { it.name }
         for (island in atoll.islands) {
-            if (islandRing.containsKey(island.key)) continue
+            if (islandRing.containsKey(island.key) || island.key in suspect) continue
             val p = pos.getValue(island.key)
             val cand = outlines.indices.filter { idx ->
                 usedBy[idx] == null && outlines[idx].type != "resort" && outlines[idx].type != "airport" &&
@@ -159,13 +179,27 @@ object IslandShapeDownloader {
         val missing = atoll.islands.map { it.key }.filter { !islandRing.containsKey(it) }.toSet()
         missing.forEach { warnings[it] = "no outline found - uses the island centre point" }
 
-        // Other named islands (resorts, airports, uninhabited) not used by an inhabited island.
-        val others = outlines.indices.asSequence()
-            .filter { usedBy[it] == null && outlines[it].name.isNotBlank() && IslandShapes.area(outlines[it].ring) >= 2_000 }
+        // Other named islands (resorts, airports, uninhabited) - not the same land as an inhabited island.
+        val usedRings = usedBy.keys.map { outlines[it].ring }
+        fun sameLand(r: List<LatLon>): Boolean {
+            val c = IslandShapes.centroid(r)
+            return usedRings.any { u ->
+                IslandShapes.pointInRing(c.lat, c.lon, u) ||
+                    IslandShapes.centroid(u).let { cu -> IslandShapes.pointInRing(cu.lat, cu.lon, r) && IslandShapes.area(r) <= IslandShapes.area(u) * 1.6 }
+            }
+        }
+        val candidates = outlines.indices.asSequence()
+            .filter { usedBy[it] == null && outlines[it].name.isNotBlank() && IslandShapes.area(outlines[it].ring) >= 2_000 && !sameLand(outlines[it].ring) }
             .map { outlines[it] }
-            .distinctBy { it.name.lowercase() + "@" + String.format(java.util.Locale.US, "%.3f,%.3f", IslandShapes.centroid(it.ring).lat, IslandShapes.centroid(it.ring).lon) }
-            .map { Triple(it.name, it.type, IslandShapes.simplify(it.ring, 8.0)) }
+            .sortedByDescending { IslandShapes.area(it.ring) }
             .toList()
+        // One entry per name within 3 km (keeps the biggest), so "Kaadedhdhoo" is not listed twice.
+        val kept = ArrayList<mv.haluvi.navigation.net.OpenStreetMap.Outline>()
+        for (o in candidates) {
+            val c = IslandShapes.centroid(o.ring)
+            if (kept.none { k -> IslandShapes.sameName(k.name, o.name) && IslandShapes.centroid(k.ring).let { Geo.distance(it.lat, it.lon, c.lat, c.lon) < 3_000 } }) kept.add(o)
+        }
+        val others = kept.map { Triple(it.name, it.type, IslandShapes.simplify(it.ring, 8.0)) }
 
         return IslandShapes.AtollData(atoll.code, atoll.islands.map { it.key }.toSet(), rings, islandRing, names, methods, corrected, warnings, missing, others)
     }

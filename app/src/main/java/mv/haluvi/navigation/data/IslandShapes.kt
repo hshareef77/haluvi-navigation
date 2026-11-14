@@ -31,7 +31,7 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
     @Volatile private var warnings: Map<String, String> = emptyMap()
     @Volatile var atollsDone: Set<String> = emptySet(); private set
     @Volatile var notOnMap: Set<String> = emptySet(); private set
-    /** File format: 3 = matched with the 2.4 rules. Older downloads should be done again. */
+    /** File format: 4 = matched with the 2.5 rules. Older downloads are done again. */
     @Volatile var formatVersion: Int = 0; private set
 
     /** Built-in positions, kept so corrections can be re-applied or undone. */
@@ -147,7 +147,7 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
         rings = r; islandRing = ir; osmNames = names; methods = meth; warnings = warn; corrected = c; correctedBy = cb; extras = ex
         atollsDone = atollsDone + d.code
         notOnMap = (notOnMap - d.islandKeys) + d.missing
-        formatVersion = 3
+        formatVersion = 4
         applyCorrections()
         save()
     }
@@ -163,7 +163,7 @@ class IslandShapes(context: Context, private val islands: IslandRepository) {
     }
 
     private fun save() {
-        val o = JSONObject().put("v", 3)
+        val o = JSONObject().put("v", 4)
         val rj = JSONObject()
         rings.forEach { (k, pts) -> val arr = JSONArray(); pts.forEach { arr.put(JSONArray().put(round6(it.lat)).put(round6(it.lon))) }; rj.put(k, arr) }
         o.put("rings", rj)

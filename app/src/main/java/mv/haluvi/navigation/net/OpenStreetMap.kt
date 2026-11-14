@@ -185,7 +185,10 @@ class OpenStreetMap {
      * A closed island ring from OpenStreetMap.
      * [type]: "inhabited", "resort", "airport" or "island" (no people, no resort).
      */
-    data class Outline(val name: String, val ring: List<LatLon>, val type: String)
+    data class Outline(val name: String, val ring: List<LatLon>, val type: String, val places: List<NamedPoint> = emptyList())
+
+    /** A named village/town/island point inside an outline (used to place joined islands exactly). */
+    data class NamedPoint(val name: String, val lat: Double, val lon: Double)
 
     private data class MapPoint(val lat: Double, val lon: Double, val name: String, val kind: String)
 
@@ -257,16 +260,33 @@ class OpenStreetMap {
         for (ring in stitch(coastPieces)) {
             if (ring.size < 4) continue
             val c = centroidOf(ring)
-            val dup = named.any { (_, r) -> Geo.distance(c.lat, c.lon, centroidOf(r).lat, centroidOf(r).lon) < 30 && kotlin.math.abs(r.size - ring.size) < ring.size / 2 + 3 }
+            // Same island stored twice (tagged island + coastline): each centre inside the other and similar size.
+            val a1 = ringArea(ring)
+            val dup = named.any { (_, r) ->
+                val c2 = centroidOf(r)
+                pointInRingSimple(c.lat, c.lon, r) && pointInRingSimple(c2.lat, c2.lon, ring) && ringArea(r).let { a2 -> a2 > 0 && a1 / a2 in 0.6..1.6 }
+            }
             if (!dup) rings.add("" to ring)
         }
 
-        return rings.map { (nm, ring) ->
+        // Tagged islands can also be duplicated (way + relation): keep one per island.
+        val unique = ArrayList<Pair<String, List<LatLon>>>()
+        for (cand in rings) {
+            val c = centroidOf(cand.second); val a1 = ringArea(cand.second)
+            val same = unique.indexOfFirst { (_, r) ->
+                val c2 = centroidOf(r)
+                pointInRingSimple(c.lat, c.lon, r) && pointInRingSimple(c2.lat, c2.lon, cand.second) && ringArea(r).let { a2 -> a2 > 0 && a1 / a2 in 0.6..1.6 }
+            }
+            if (same < 0) unique.add(cand) else if (unique[same].first.isBlank() && cand.first.isNotBlank()) unique[same] = cand
+        }
+
+        return unique.map { (nm, ring) ->
             val inside = points.filter { pointInRingSimple(it.lat, it.lon, ring) }
+            // People live there -> inhabited, even with an airport (Hulhumalé, Gan, Hanimaadhoo).
             val type = when {
+                inside.any { it.kind == "inhabited" } -> "inhabited"
                 inside.any { it.kind == "airport" } -> "airport"
                 inside.any { it.kind == "resort" } -> "resort"
-                inside.any { it.kind == "inhabited" } -> "inhabited"
                 else -> "island"
             }
             val name = nm.ifBlank {
@@ -276,8 +296,17 @@ class OpenStreetMap {
                     ?: inside.firstOrNull { it.kind == "resort" && it.name.isNotBlank() }?.name
                     ?: ""
             }
-            Outline(shortName(name), ring, type)
+            val places = inside.filter { (it.kind == "inhabited" || it.kind == "island") && it.name.isNotBlank() }.map { NamedPoint(it.name, it.lat, it.lon) }
+            Outline(shortName(name), ring, type, places)
         }
+    }
+
+    private fun ringArea(r: List<LatLon>): Double {
+        if (r.size < 3) return 0.0
+        val k = kotlin.math.cos(Math.toRadians(r[0].lat)) * 111_320.0
+        var s = 0.0
+        for (i in r.indices) { val a = r[i]; val b = r[(i + 1) % r.size]; s += (a.lon * k) * (b.lat * 110_540.0) - (b.lon * k) * (a.lat * 110_540.0) }
+        return kotlin.math.abs(s) / 2
     }
 
     private fun centroidOf(r: List<LatLon>) = LatLon(r.sumOf { it.lat } / r.size, r.sumOf { it.lon } / r.size)
