@@ -30,6 +30,7 @@ class SettingsScreen : Screen() {
         ui.button("Navigation") { host.show { NavigationSettingsScreen() } }
         ui.button("Google Maps") { host.show { GoogleSettingsScreen() } }
         ui.button("Island map") { host.show { MapDataScreen() } }
+        ui.button("Island outlines") { host.show { IslandOutlinesScreen() } }
         ui.button("About") {
             host.show { TextScreen("About", listOf(
                 "Haluvi Navigation ${BuildConfig.VERSION_NAME}.",
@@ -97,7 +98,7 @@ class NavigationSettingsScreen : Screen() {
         ui.button("Island arrival: ${Phrases.distance(s.islandArrivalDistance.toDouble())}") {
             host.show(Pickers.meters(host, "Island arrival distance", listOf(300, 500, 1000, 2000), s.islandArrivalDistance) { s.islandArrivalDistance = it })
         }
-        toggle(ui, "Say islands I pass", { s.islandArrivalIdentityOn }) { s.islandArrivalIdentityOn = it }
+        toggle(ui, "Island stop announcements", { s.islandStopAnnouncementsOn }) { s.islandStopAnnouncementsOn = it }
         toggle(ui, "Keep screen on", { s.keepAwake }) { s.keepAwake = it }
         ui.button("Refresh GPS") { AppGraph.location.restart(); host.say("GPS refreshed") }
         ui.button("Back") { host.back() }

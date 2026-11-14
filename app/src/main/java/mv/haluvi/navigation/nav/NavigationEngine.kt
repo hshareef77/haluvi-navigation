@@ -13,6 +13,7 @@ import mv.haluvi.navigation.core.Fmt
 import mv.haluvi.navigation.core.Geo
 import mv.haluvi.navigation.data.Island
 import mv.haluvi.navigation.data.IslandRepository
+import mv.haluvi.navigation.data.IslandShapes
 import mv.haluvi.navigation.data.LocationStore
 import mv.haluvi.navigation.data.SavedLocation
 import mv.haluvi.navigation.data.Settings
@@ -52,6 +53,7 @@ class NavigationEngine(
     private val context: Context,
     private val settings: Settings,
     private val islands: IslandRepository,
+    private val shapes: IslandShapes,
     private val store: LocationStore,
     private val location: LocationTracker,
     private val compass: CompassTracker,
@@ -100,7 +102,6 @@ class NavigationEngine(
     private var smoothedSpeed: Double? = null
     private var lastSpeedDist: Double? = null
     private var lastSpeedMs = 0L
-    private var lastNearIslandKey = ""
     private var pointing = false
     private var pointStatus = ""
     private var lastHintSpeakMs = 0L
@@ -137,8 +138,16 @@ class NavigationEngine(
     // Before start
     // =====================================================================
 
-    /** "300 meters, at 2 o'clock." from the current GPS position, or a GPS message. */
-    fun previewText(d: Destination): String {
+    /**
+     * "300 meters, at 2 o'clock." from the GPS position, or from a chosen starting point
+     * ([fromLat]/[fromLon], used for planning; directions are then given as compass directions).
+     */
+    fun previewText(d: Destination, fromLat: Double? = null, fromLon: Double? = null): String {
+        if (fromLat != null && fromLon != null) {
+            val dist = Geo.distance(fromLat, fromLon, d.lat, d.lon)
+            val b = Geo.bearing(fromLat, fromLon, d.lat, d.lon)
+            return "${Phrases.distance(dist)}, ${Geo.directionName(b)}, ${Geo.degreesInt(b)} degrees."
+        }
         val f = location.fix ?: return "Waiting for GPS."
         val dist = Geo.distance(f.lat, f.lon, d.lat, d.lon)
         val b = Geo.bearing(f.lat, f.lon, d.lat, d.lon)
@@ -184,7 +193,7 @@ class NavigationEngine(
         distHistory.clear(); arrivalCount = 0
         lastDistSpoken = -1; lastDistSpeakMs = 0; lastGpsWaitSpeakMs = 0
         smoothedSpeed = null; lastSpeedDist = null; lastSpeedMs = 0; lastDistance = null
-        lastNearIslandKey = ""; pointing = false; pointStatus = ""
+        pointing = false; pointStatus = ""
         haptics.stopFocus()
     }
 
@@ -224,15 +233,6 @@ class NavigationEngine(
 
         if (confirmArrival(dist, f)) { arrive(t); return }
 
-        if (t.kind == NavKind.ISLAND && settings.islandArrivalIdentityOn) {
-            islands.nearest(f.lat, f.lon)?.let { near ->
-                if (near.distance <= settings.islandArrivalDistance && near.island.key != t.islandKey && near.island.key != lastNearIslandKey) {
-                    lastNearIslandKey = near.island.key
-                    speaker.speak("Passing ${near.island.name}.")
-                }
-            }
-        }
-
         directionText = "Destination ${Phrases.where(compass.heading, bearing)}."
         val r = route
         if (t.kind == NavKind.PLACE && r != null) {
@@ -255,7 +255,11 @@ class NavigationEngine(
             speaker.speak("${t.name}, $text", flush = false)
             return
         }
-        val milestones = if (t.kind == NavKind.ISLAND) intArrayOf(20000, 10000, 5000, 2000, 1000, 500) else intArrayOf(500, 200, 100, 50, 20)
+        val milestones = when {
+            t.kind == NavKind.ISLAND && settings.islandTravelAir -> intArrayOf(100000, 50000, 20000, 10000, 5000)
+            t.kind == NavKind.ISLAND -> intArrayOf(20000, 10000, 5000, 2000, 1000)
+            else -> intArrayOf(500, 200, 100, 50, 20)
+        }
         var shouldSpeak = milestones.any { lastDistSpoken > it && d <= it }
         if (!shouldSpeak && now - lastDistSpeakMs >= 60_000) shouldSpeak = true
         if (shouldSpeak) { lastDistSpeakMs = now; lastDistSpoken = d; speaker.speak(text) }
@@ -293,6 +297,16 @@ class NavigationEngine(
 
     private fun confirmArrival(dist: Double, f: Fix): Boolean {
         val t = target ?: return false
+        if (t.kind == NavKind.ISLAND) {
+            val key = t.islandKey.orEmpty()
+            // With an outline: arrived when on the island (stops at the shore are handled by IslandWatcher).
+            val onIsland = if (shapes.has(key)) shapes.inside(key, f.lat, f.lon)
+            else dist <= (if (settings.islandTravelAir) maxOf(2000.0, settings.islandArrivalDistance.toDouble()) else settings.islandArrivalDistance.toDouble()) &&
+                (f.speedMps ?: 0.0) < (if (settings.islandTravelAir) 15.0 else 3.0)
+            if (!onIsland || f.accuracy >= 100) { arrivalCount = 0; return false }
+            arrivalCount++
+            return arrivalCount >= 2
+        }
         val arrivalDist = if (t.kind == NavKind.ISLAND) settings.islandArrivalDistance.toDouble() else settings.arrivalDistance.toDouble()
         // Accept a slightly larger circle when GPS is weak, so arrival is not missed.
         val limit = if (t.kind == NavKind.PLACE) max(arrivalDist, min(f.accuracy * 0.8, 25.0)) else arrivalDist
@@ -302,8 +316,11 @@ class NavigationEngine(
         return arrivalCount >= 2
     }
 
+    /** Called by IslandWatcher when the boat or plane has stopped at the destination island. */
+    fun arrivedAtIsland() { target?.takeIf { it.kind == NavKind.ISLAND }?.let { arrive(it) } }
+
     private fun arrive(t: Destination) {
-        val text = "Arrived at ${t.name}."
+        val text = if (t.kind == NavKind.ISLAND) "Arrived at your destination, ${t.name}." else "Arrived at ${t.name}."
         clearActiveState()
         lastArrivalText = text
         speaker.speak(text)

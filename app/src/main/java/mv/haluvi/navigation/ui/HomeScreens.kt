@@ -22,10 +22,10 @@ class HomeScreen : Screen() {
             ui.button("Going to ${t.name}. Open", color = UiColors.BUTTON_ON) { host.show { NavigationScreen() } }
         }
         ui.button("Where am I") { whereAmI(host) }
-        ui.button("Go to") { host.show { GoToScreen() } }
+        ui.button("Places") { host.show { PlacesScreen() } }
+        ui.button("Islands") { host.show { IslandsScreen() } }
         ui.button(if (g.explore.active) "Explore: On" else "Explore: Off") { host.show { ExploreScreen() } }
-        ui.button("What's around me") { host.show { AroundMeScreen() } }
-        ui.button("My places") { host.show { MyPlacesScreen(forGoTo = false) } }
+        ui.button("My places") { host.show { MyPlacesScreen() } }
         ui.button("Settings") { host.show { SettingsScreen() } }
         return scroll
     }
@@ -55,45 +55,12 @@ fun whereAmI(host: MainActivity) {
     host.scope.launch { host.speak(WhereAmI.describe()) }
 }
 
-/** Shown after choosing a destination: preview, travel mode, Start. */
-class StartScreen(private val dest: Destination, private val unsaved: mv.haluvi.navigation.data.SavedLocation? = null) : Screen() {
-    private var preview: TextView? = null
-    override fun create(): View {
-        val g = AppGraph
-        val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title(dest.name)
-        preview = ui.info(g.nav.previewText(dest))
-        ui.button("Start", color = UiColors.BUTTON_ON) {
-            if (!host.hasLocationPermission()) { host.requestPermissionsIfNeeded(); return@button }
-            g.nav.start(dest)
-            host.showNavigation()
-        }
-        if (dest.kind == mv.haluvi.navigation.nav.NavKind.PLACE) {
-            ui.button("Travel mode: ${g.settings.travelMode.label}") {
-                g.settings.travelMode = if (g.settings.travelMode == mv.haluvi.navigation.data.TravelMode.WALKING) mv.haluvi.navigation.data.TravelMode.DRIVING else mv.haluvi.navigation.data.TravelMode.WALKING
-                host.say("Travel mode: ${g.settings.travelMode.label}")
-                rebuild()
-            }
-        }
-        if (unsaved != null && g.store.findDuplicate(unsaved.name, unsaved.lat, unsaved.lon) == null) {
-            ui.button("Save to my places") {
-                g.store.add(unsaved)
-                host.speak("Saved.")
-                rebuild()
-            }
-        }
-        ui.button("Back") { host.back() }
-        return scroll
-    }
-
-    override fun onSecond() { preview?.text = AppGraph.nav.previewText(dest) }
-}
-
 /** While navigating: instruction, distance, direction; Repeat, What's in this direction, More details, Stop. */
 class NavigationScreen : Screen() {
     private var instruction: TextView? = null
     private var distance: TextView? = null
     private var direction: TextView? = null
+    private var islandLine: TextView? = null
     private var wasActive = false
 
     override fun create(): View {
@@ -104,7 +71,7 @@ class NavigationScreen : Screen() {
         wasActive = t != null
         if (t == null) {
             titleView = ui.title(nav.lastArrivalText.ifBlank { "Navigation stopped" })
-            instruction = null; distance = null; direction = null
+            instruction = null; distance = null; direction = null; islandLine = null
             ui.button("Home") { host.showHome() }
             return scroll
         }
@@ -112,6 +79,7 @@ class NavigationScreen : Screen() {
         instruction = ui.info(nav.instructionText)
         distance = ui.info(nav.distanceText)
         direction = ui.info(nav.directionText)
+        islandLine = if (t.kind == mv.haluvi.navigation.nav.NavKind.ISLAND) ui.info(g.islandWatcher.lastMessage.ifBlank { "Island stops will be announced." }) else null
         ui.row(
             "Repeat" to { host.speak(nav.repeatText()) },
             "What's in this direction" to { host.speak(Surroundings.inDirection()) }
@@ -127,6 +95,7 @@ class NavigationScreen : Screen() {
         instruction?.text = nav.instructionText.ifBlank { "Starting." }
         distance?.text = nav.distanceText.ifBlank { "Distance: waiting for GPS." }
         direction?.text = nav.directionText.ifBlank { " " }
+        islandLine?.text = AppGraph.islandWatcher.lastMessage.ifBlank { "Island stops will be announced." }
     }
 }
 
@@ -233,8 +202,7 @@ class AroundMeScreen : Screen() {
                 val heading = AppGraph.compass.heading
                 items.forEach { it2 ->
                     ui.button(mv.haluvi.navigation.nav.Phrases.place(it2.name, heading, it2.bearing, it2.distance)) {
-                        val loc = it2.toSavedLocation()
-                        host.show { StartScreen(Destination.of(loc), if (it2.saved == null) loc else null) }
+                        goToPlace(host, it2.toSavedLocation())
                     }
                 }
                 note?.let { ui.info(it) }

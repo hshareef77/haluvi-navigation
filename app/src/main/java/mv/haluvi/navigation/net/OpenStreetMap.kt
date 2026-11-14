@@ -1,6 +1,7 @@
 package mv.haluvi.navigation.net
 
 import mv.haluvi.navigation.core.Geo
+import mv.haluvi.navigation.core.LatLon
 import mv.haluvi.navigation.data.DownloadedRoad
 import org.json.JSONArray
 import org.json.JSONObject
@@ -178,5 +179,67 @@ class OpenStreetMap {
             out.add(DownloadedRoad(name, pts))
         }
         return out
+    }
+
+    /** A closed coastline ring found in OpenStreetMap, with its name if tagged. */
+    data class Outline(val name: String, val ring: List<LatLon>)
+
+    /** Island outlines (place=island/islet and closed coastlines) inside a box. */
+    fun islandOutlines(south: Double, west: Double, north: Double, east: Double): List<Outline> {
+        val bbox = "$south,$west,$north,$east"
+        val q = "[out:json][timeout:120];(way[\"place\"~\"^(island|islet)$\"]($bbox);relation[\"place\"~\"^(island|islet)$\"]($bbox);way[\"natural\"=\"coastline\"]($bbox););out geom tags;"
+        val arr = JSONObject(overpass(q)).optJSONArray("elements") ?: return emptyList()
+        val out = ArrayList<Outline>()
+        fun geom(a: JSONArray?): List<LatLon> {
+            if (a == null) return emptyList()
+            return (0 until a.length()).mapNotNull { j -> a.optJSONObject(j)?.let { LatLon(it.getDouble("lat"), it.getDouble("lon")) } }
+        }
+        for (i in 0 until arr.length()) {
+            val e = arr.getJSONObject(i)
+            val tags = e.optJSONObject("tags")
+            val name = tags?.optString("name:en").orEmpty().ifBlank { tags?.optString("name").orEmpty() }
+            when (e.optString("type")) {
+                "way" -> {
+                    val g = geom(e.optJSONArray("geometry"))
+                    if (g.size >= 4 && Geo.distance(g.first().lat, g.first().lon, g.last().lat, g.last().lon) < 5) out.add(Outline(name, g))
+                }
+                "relation" -> {
+                    val members = e.optJSONArray("members") ?: continue
+                    val parts = ArrayList<List<LatLon>>()
+                    for (m in 0 until members.length()) {
+                        val mo = members.getJSONObject(m)
+                        if (mo.optString("type") == "way" && mo.optString("role") != "inner") geom(mo.optJSONArray("geometry")).takeIf { it.size >= 2 }?.let { parts.add(it) }
+                    }
+                    stitch(parts).forEach { if (it.size >= 4) out.add(Outline(name, it)) }
+                }
+            }
+        }
+        return out
+    }
+
+    /** Joins way pieces that share end points into closed rings. */
+    private fun stitch(pieces: List<List<LatLon>>): List<List<LatLon>> {
+        val remaining = pieces.map { it.toMutableList() }.toMutableList()
+        val rings = ArrayList<List<LatLon>>()
+        fun same(a: LatLon, b: LatLon) = Geo.distance(a.lat, a.lon, b.lat, b.lon) < 2
+        while (remaining.isNotEmpty()) {
+            val ring = remaining.removeAt(0)
+            var grew = true
+            while (grew && !same(ring.first(), ring.last())) {
+                grew = false
+                val it = remaining.iterator()
+                while (it.hasNext()) {
+                    val p = it.next()
+                    when {
+                        same(ring.last(), p.first()) -> { ring.addAll(p.drop(1)); it.remove(); grew = true }
+                        same(ring.last(), p.last()) -> { ring.addAll(p.reversed().drop(1)); it.remove(); grew = true }
+                        same(ring.first(), p.last()) -> { ring.addAll(0, p.dropLast(1)); it.remove(); grew = true }
+                        same(ring.first(), p.first()) -> { ring.addAll(0, p.reversed().dropLast(1)); it.remove(); grew = true }
+                    }
+                }
+            }
+            if (same(ring.first(), ring.last())) rings.add(ring)
+        }
+        return rings
     }
 }

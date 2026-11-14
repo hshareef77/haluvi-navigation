@@ -134,6 +134,13 @@ class MainActivity : Activity() {
         show { HomeScreen() }
     }
 
+    /** Clears the stack to Home and opens a trip screen (Places or Islands). */
+    fun showTrip(factory: () -> Screen) {
+        stack.clear()
+        stack.add(HomeScreen())
+        show(factory)
+    }
+
     /** Clears the stack and opens the navigation screen (after Start). */
     fun showNavigation() {
         stack.clear()

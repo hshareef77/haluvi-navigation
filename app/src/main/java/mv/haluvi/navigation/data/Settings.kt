@@ -33,7 +33,14 @@ class Settings(context: Context) {
     var keepAwake by bool("keepAwake", false)
     var arrivalDistance by int("arrivalDistance", 10)
     var islandArrivalDistance by int("islandArrivalDistance", 1000)
-    var islandArrivalIdentityOn by bool("islandArrivalIdentityOn", true)
+    /** "Approaching / Arrived at / Passing" island announcements during island trips and Explore at sea. */
+    var islandStopAnnouncementsOn by bool("islandStopAnnouncementsOn", true)
+    /** Island trips: false = sea (ferry, boat), true = air (plane, seaplane). */
+    var islandTravelAir by bool("islandTravelAir", false)
+    /** Places "From": saved place id, or empty for my GPS location. */
+    var placeFromId by string("placeFromId", "")
+    /** Islands "From": island key, or empty for the GPS island. */
+    var islandFromKey by string("islandFromKey", "")
 
     // How directions and distances are spoken
     /** true: "2 o'clock". false: "north east, 45 degrees". */

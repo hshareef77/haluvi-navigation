@@ -4,8 +4,11 @@ An accessible GPS navigation app for blind and low vision travellers in the Mald
 It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of its final (v130) features.
 
 ## Features
-- **Home**: Where am I, Go to, Explore, What's around me, My places, Settings.
-- **Go to**: a saved place, an online search result, or any of the 200 inhabited islands. Press Start.
+- **Home**: Where am I, Places, Islands, Explore, My places, Settings.
+- **Places** (walking or driving): From (my location or a saved place), To (my places, search, what's around me), Start.
+- **Islands** (sea or air): From (GPS island or chosen), To (any of the 200 inhabited islands), Start.
+  - Island stop announcements: "Approaching …", "Arrived at …" (ferry stop), "Passing …".
+  - Exact with island outlines, downloaded once in the app from OpenStreetMap.
 - **While navigating**: the next instruction, distance and time, Repeat, What's in this direction, Stop.
   - Google road routes (optional) with spoken turn instructions and automatic re-route.
   - Without Google: clock-position guidance ("2 o'clock, 300 meters").

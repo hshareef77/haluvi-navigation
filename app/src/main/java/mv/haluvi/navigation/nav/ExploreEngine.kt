@@ -60,6 +60,8 @@ class ExploreEngine(
     var roadText = ""; private set
     var lastSpoken = ""; private set
     var hasMapRoads = false; private set
+    /** Set by AppGraph: true when the position is on the sea (island announcements take over). */
+    var atSea: (Fix) -> Boolean = { false }
 
     // GPS gate
     private var goodCount = 0
@@ -162,6 +164,13 @@ class ExploreEngine(
             say("GPS good. Explore on.", force = true)
         }
         f!!
+        if (atSea(f)) {
+            // On a ferry or boat: roads and shop announcements make no sense; island announcements run instead.
+            statusText = "At sea. Island announcements are on."
+            roadText = ""
+            notifyChanged()
+            return
+        }
         loadRoadsFor(f)
         val moving = (f.speedMps ?: 0.0) >= 0.5 && f.bearing != null
         statusText = if (moving) "Exploring." else "Exploring. Start walking to hear places on your left and right."

@@ -18,41 +18,24 @@ import mv.haluvi.navigation.nav.Phrases
 import mv.haluvi.navigation.net.Http
 import mv.haluvi.navigation.net.OnlinePlace
 
-/** Go to: My places, Search, Islands. */
-class GoToScreen : Screen() {
-    override fun create(): View {
-        val g = AppGraph
-        val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title("Go to")
-        ui.button("My places") { host.show { MyPlacesScreen(forGoTo = true) } }
-        ui.button("Search") { host.show { SearchScreen() } }
-        ui.button("Islands") { host.show { AtollPickerScreen { island -> host.show { StartScreen(Destination.of(island)) } } } }
-        val f = g.location.fix
-        if (f != null) {
-            val near = g.store.nearest(f.lat, f.lon).take(5)
-            if (near.isNotEmpty()) {
-                ui.heading("Nearest of my places")
-                near.forEach { hit ->
-                    ui.button(Phrases.place(hit.loc.name, g.compass.heading, hit.bearing, hit.distance)) {
-                        host.show { StartScreen(Destination.of(hit.loc)) }
-                    }
-                }
-            }
-        }
-        ui.button("Back") { host.back() }
-        return scroll
-    }
-}
-
-/** Saved and downloaded places. [forGoTo]: tapping a place opens Start; otherwise it opens place options. */
-class MyPlacesScreen(private val forGoTo: Boolean) : Screen() {
+/**
+ * Saved and downloaded places, nearest first.
+ * With [onPick] it is a chooser (tap = choose); without it, it manages places (tap = place options).
+ */
+class MyPlacesScreen(
+    private val title: String = "My places",
+    private val firstChoice: Pair<String, () -> Unit>? = null,
+    private val onPick: ((SavedLocation) -> Unit)? = null
+) : Screen() {
+    private val forGoTo: Boolean get() = onPick != null
     private var query = ""
     private var limit = 40
 
     override fun create(): View {
         val g = AppGraph
         val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title("My places")
+        titleView = ui.title(title)
+        firstChoice?.let { (label, action) -> ui.button(label) { action() } }
         if (!forGoTo) {
             ui.button("Save this place") { host.show { SavePlaceScreen() } }
             ui.button("Download island map") { host.show { MapDataScreen() } }
@@ -68,7 +51,8 @@ class MyPlacesScreen(private val forGoTo: Boolean) : Screen() {
         rows.take(limit).forEach { (loc, d, b) ->
             val text = if (d != null && b != null) Phrases.place(loc.name, g.compass.heading, b, d) else loc.name
             ui.button(text) {
-                if (forGoTo) host.show { StartScreen(Destination.of(loc)) } else host.show { PlaceScreen(loc.id) }
+                val pick = onPick
+                if (pick != null) pick(loc) else host.show { PlaceScreen(loc.id) }
             }
         }
         if (rows.size > limit) ui.button("More places") { limit += 40; rebuild() }
@@ -123,7 +107,7 @@ class PlaceScreen(private val id: String) : Screen() {
         if (loc.categoryId != "none") parts.add(loc.categoryName + ".")
         if (loc.islandName.isNotBlank()) parts.add(loc.islandName + ".")
         if (parts.isNotEmpty()) ui.info(parts.joinToString(" "))
-        ui.button("Go there", color = UiColors.BUTTON_ON) { host.show { StartScreen(Destination.of(loc)) } }
+        ui.button("Go there", color = UiColors.BUTTON_ON) { goToPlace(host, loc) }
         ui.button("Edit") { host.show { EditPlaceScreen(id) } }
         ui.button("Delete", color = UiColors.BUTTON_STOP) {
             host.show { ConfirmScreen("Delete ${loc.name}?", "Delete") {
@@ -234,7 +218,7 @@ class SearchScreen : Screen() {
                 val loc = SavedLocation(SavedLocation.newId(), p.name, p.lat, p.lon,
                     source = if (p.source == "google") SavedLocation.SOURCE_GOOGLE else SavedLocation.SOURCE_OSM_SEARCH,
                     categoryId = Categories.guess(p.name + " " + p.typeText), address = p.address)
-                host.show { StartScreen(Destination.of(loc), loc) }
+                goToPlace(host, loc)
             }
         }
         ui.button("Back") { host.back() }
