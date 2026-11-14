@@ -106,7 +106,7 @@ class IslandWatcher(
             if (h.shore > lim.approach) continue
             val key = h.island.key
             val isDest = key == destKey
-            val name = h.island.name
+            val name = h.island.spokenName
             // Without an outline the harbour can be far from the island centre, so allow a wider shore zone.
             val near = if (shapes.has(key)) lim.near else lim.near + 450
             val isNew = !visits.containsKey(key)
@@ -120,7 +120,7 @@ class IslandWatcher(
                 val towards = Geo.angleBetween(f.bearing, Geo.bearing(f.lat, f.lon, h.island.lat, h.island.lon)) <= 25
                 if (towards) {
                     v.approached = true
-                    announce(if (isDest) "Approaching your destination, $name, ${Phrases.distance(h.shore)}." else "Approaching $name, ${Phrases.distance(h.shore)}.", flush = false)
+                    announce(if (isDest) "Approaching your destination, ${h.island.name}, ${Phrases.distance(h.shore)}." else "Approaching $name, ${Phrases.distance(h.shore)}.", flush = false)
                 }
             }
 

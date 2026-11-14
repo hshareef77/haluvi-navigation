@@ -181,64 +181,148 @@ class OpenStreetMap {
         return out
     }
 
-    /** A closed coastline ring found in OpenStreetMap, with its name if tagged. */
-    data class Outline(val name: String, val ring: List<LatLon>)
+    /**
+     * A closed island ring from OpenStreetMap.
+     * [type]: "inhabited", "resort", "airport" or "island" (no people, no resort).
+     */
+    data class Outline(val name: String, val ring: List<LatLon>, val type: String)
 
-    /** Island outlines (place=island/islet and closed coastlines) inside a box. */
+    private data class MapPoint(val lat: Double, val lon: Double, val name: String, val kind: String)
+
+    /**
+     * Island outlines inside a box: islands tagged as islands, plus coastline pieces joined into
+     * complete islands (big joined islands like Malé or Addu are often stored in pieces).
+     * Unnamed outlines get their name from a named place, resort or airport inside them.
+     */
     fun islandOutlines(south: Double, west: Double, north: Double, east: Double): List<Outline> {
         val bbox = "$south,$west,$north,$east"
-        val q = "[out:json][timeout:120];(way[\"place\"~\"^(island|islet)$\"]($bbox);relation[\"place\"~\"^(island|islet)$\"]($bbox);way[\"natural\"=\"coastline\"]($bbox););out geom tags;"
+        val q = "[out:json][timeout:180];(" +
+            "way[\"place\"~\"^(island|islet)$\"]($bbox);relation[\"place\"~\"^(island|islet)$\"]($bbox);" +
+            "way[\"natural\"=\"coastline\"]($bbox);" +
+            ");out geom tags;" +
+            "(node[\"place\"~\"^(island|islet|city|town|village|hamlet)$\"]($bbox);" +
+            "nwr[\"tourism\"~\"^(resort|hotel)$\"]($bbox);nwr[\"aeroway\"=\"aerodrome\"]($bbox););out center tags;"
         val arr = JSONObject(overpass(q)).optJSONArray("elements") ?: return emptyList()
-        val out = ArrayList<Outline>()
         fun geom(a: JSONArray?): List<LatLon> {
             if (a == null) return emptyList()
             return (0 until a.length()).mapNotNull { j -> a.optJSONObject(j)?.let { LatLon(it.getDouble("lat"), it.getDouble("lon")) } }
         }
+        fun closed(g: List<LatLon>) = g.size >= 4 && Geo.distance(g.first().lat, g.first().lon, g.last().lat, g.last().lon) < 5
+
+        val named = ArrayList<Pair<String, List<LatLon>>>()
+        val coastPieces = ArrayList<List<LatLon>>()
+        val points = ArrayList<MapPoint>()
         for (i in 0 until arr.length()) {
             val e = arr.getJSONObject(i)
-            val tags = e.optJSONObject("tags")
-            val name = tags?.optString("name:en").orEmpty().ifBlank { tags?.optString("name").orEmpty() }
+            val tags = e.optJSONObject("tags") ?: JSONObject()
+            val name = tags.optString("name:en").ifBlank { tags.optString("name") }
+            val isIslandTag = tags.optString("place").let { it == "island" || it == "islet" }
+            val geometry = e.optJSONArray("geometry")
+            // Points (place nodes, resorts, airports): from nodes, or the centre of ways/relations.
+            val pLat = if (e.has("lat")) e.optDouble("lat") else e.optJSONObject("center")?.optDouble("lat")
+            val pLon = if (e.has("lon")) e.optDouble("lon") else e.optJSONObject("center")?.optDouble("lon")
+            if (geometry == null && e.optString("type") != "relation" || e.has("center")) {
+                if (pLat != null && pLon != null) {
+                    val kind = when {
+                        tags.optString("aeroway") == "aerodrome" -> "airport"
+                        tags.optString("tourism") == "resort" || tags.optString("tourism") == "hotel" -> "resort"
+                        isIslandTag -> "island"
+                        tags.has("place") -> "inhabited"
+                        else -> ""
+                    }
+                    if (kind.isNotEmpty()) points.add(MapPoint(pLat, pLon, name, kind))
+                }
+                if (e.has("center")) continue
+            }
             when (e.optString("type")) {
                 "way" -> {
-                    val g = geom(e.optJSONArray("geometry"))
-                    if (g.size >= 4 && Geo.distance(g.first().lat, g.first().lon, g.last().lat, g.last().lon) < 5) out.add(Outline(name, g))
+                    val g = geom(geometry)
+                    if (isIslandTag && closed(g)) named.add(name to g)
+                    else if (tags.optString("natural") == "coastline" && g.size >= 2) coastPieces.add(g)
                 }
-                "relation" -> {
+                "relation" -> if (isIslandTag) {
                     val members = e.optJSONArray("members") ?: continue
                     val parts = ArrayList<List<LatLon>>()
                     for (m in 0 until members.length()) {
                         val mo = members.getJSONObject(m)
                         if (mo.optString("type") == "way" && mo.optString("role") != "inner") geom(mo.optJSONArray("geometry")).takeIf { it.size >= 2 }?.let { parts.add(it) }
                     }
-                    stitch(parts).forEach { if (it.size >= 4) out.add(Outline(name, it)) }
+                    stitch(parts).forEach { if (it.size >= 4) named.add(name to it) }
                 }
             }
         }
-        return out
+
+        // Join coastline pieces; keep rings that are not already present as a tagged island.
+        val rings = ArrayList<Pair<String, List<LatLon>>>(named)
+        for (ring in stitch(coastPieces)) {
+            if (ring.size < 4) continue
+            val c = centroidOf(ring)
+            val dup = named.any { (_, r) -> Geo.distance(c.lat, c.lon, centroidOf(r).lat, centroidOf(r).lon) < 30 && kotlin.math.abs(r.size - ring.size) < ring.size / 2 + 3 }
+            if (!dup) rings.add("" to ring)
+        }
+
+        return rings.map { (nm, ring) ->
+            val inside = points.filter { pointInRingSimple(it.lat, it.lon, ring) }
+            val type = when {
+                inside.any { it.kind == "airport" } -> "airport"
+                inside.any { it.kind == "resort" } -> "resort"
+                inside.any { it.kind == "inhabited" } -> "inhabited"
+                else -> "island"
+            }
+            val name = nm.ifBlank {
+                inside.firstOrNull { it.kind == "island" && it.name.isNotBlank() }?.name
+                    ?: inside.firstOrNull { it.kind == "inhabited" && it.name.isNotBlank() }?.name
+                    ?: inside.firstOrNull { it.kind == "airport" && it.name.isNotBlank() }?.name
+                    ?: inside.firstOrNull { it.kind == "resort" && it.name.isNotBlank() }?.name
+                    ?: ""
+            }
+            Outline(shortName(name), ring, type)
+        }
     }
 
-    /** Joins way pieces that share end points into closed rings. */
+    private fun centroidOf(r: List<LatLon>) = LatLon(r.sumOf { it.lat } / r.size, r.sumOf { it.lon } / r.size)
+
+    private fun pointInRingSimple(lat: Double, lon: Double, ring: List<LatLon>): Boolean {
+        var inside = false
+        var j = ring.size - 1
+        for (i in ring.indices) {
+            val a = ring[i]; val b = ring[j]
+            if ((a.lat > lat) != (b.lat > lat) && lon < (b.lon - a.lon) * (lat - a.lat) / (b.lat - a.lat) + a.lon) inside = !inside
+            j = i
+        }
+        return inside
+    }
+
+    /** Shorter spoken names: "SAii Lagoon Maldives, Curio Collection by Hilton" -> "SAii Lagoon". */
+    fun shortName(name: String): String {
+        var n = name.substringBefore(",").trim()
+        for (suffix in listOf(" Maldives Resort", " Island Resort & Spa", " Resort & Spa", " Resort and Spa", " Island Resort", " Maldives", " Resort")) {
+            if (n.endsWith(suffix, true) && n.length > suffix.length + 3) n = n.dropLast(suffix.length).trim()
+        }
+        if (n.startsWith("The ", true) && n.length > 10) n = n.substring(4)
+        return n
+    }
+
+    /** Joins way pieces that share end points into closed rings (fast: end points looked up by key). */
     private fun stitch(pieces: List<List<LatLon>>): List<List<LatLon>> {
-        val remaining = pieces.map { it.toMutableList() }.toMutableList()
+        fun key(p: LatLon) = String.format(java.util.Locale.US, "%.6f,%.6f", p.lat, p.lon)
+        val alive = BooleanArray(pieces.size) { true }
+        val byEnd = HashMap<String, MutableList<Int>>()
+        pieces.forEachIndexed { i, p -> byEnd.getOrPut(key(p.first())) { ArrayList() }.add(i); byEnd.getOrPut(key(p.last())) { ArrayList() }.add(i) }
         val rings = ArrayList<List<LatLon>>()
-        fun same(a: LatLon, b: LatLon) = Geo.distance(a.lat, a.lon, b.lat, b.lon) < 2
-        while (remaining.isNotEmpty()) {
-            val ring = remaining.removeAt(0)
-            var grew = true
-            while (grew && !same(ring.first(), ring.last())) {
-                grew = false
-                val it = remaining.iterator()
-                while (it.hasNext()) {
-                    val p = it.next()
-                    when {
-                        same(ring.last(), p.first()) -> { ring.addAll(p.drop(1)); it.remove(); grew = true }
-                        same(ring.last(), p.last()) -> { ring.addAll(p.reversed().drop(1)); it.remove(); grew = true }
-                        same(ring.first(), p.last()) -> { ring.addAll(0, p.dropLast(1)); it.remove(); grew = true }
-                        same(ring.first(), p.first()) -> { ring.addAll(0, p.reversed().dropLast(1)); it.remove(); grew = true }
-                    }
-                }
+        for (start in pieces.indices) {
+            if (!alive[start]) continue
+            alive[start] = false
+            val ring = ArrayList(pieces[start])
+            var guard = 0
+            while (key(ring.first()) != key(ring.last()) && guard++ < 5000) {
+                val endKey = key(ring.last())
+                val next = byEnd[endKey]?.firstOrNull { alive[it] } ?: break
+                alive[next] = false
+                val p = pieces[next]
+                if (key(p.first()) == endKey) ring.addAll(p.drop(1)) else ring.addAll(p.reversed().drop(1))
             }
-            if (same(ring.first(), ring.last())) rings.add(ring)
+            if (ring.size >= 4 && key(ring.first()) == key(ring.last())) rings.add(ring)
         }
         return rings
     }

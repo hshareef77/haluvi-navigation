@@ -272,14 +272,37 @@ class AtollPickerScreen(private val onPick: (Island) -> Unit) : Screen() {
         val g = AppGraph
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title("Islands")
-        val edit = ui.edit("Find island", query) { query = it; rebuild() }
+        val edit = ui.edit("Find island, resort or airport", query) { query = it; rebuild() }
         ui.button("Find") { query = edit.text.toString(); rebuild() }
         if (query.isNotBlank()) {
-            val found = g.islands.search(query)
-            if (found.isEmpty()) ui.info("No island found.")
-            found.forEach { ui.button(it.fullName) { onPick(it) } }
+            val found = g.shapes.search(query).take(40)
+            if (found.isEmpty()) ui.info("Nothing found.")
+            found.forEach { isl -> ui.button(islandLabel(isl)) { onPick(isl) } }
         }
+        if (g.shapes.extras.isNotEmpty()) ui.button("Resorts, airports and other islands nearby") { host.show { OtherIslandsScreen(onPick) } }
         g.islands.atolls.forEach { a -> ui.button(a.fullName) { host.show { IslandPickerScreen(a, onPick) } } }
+        ui.button("Back") { host.back() }
+        return scroll
+    }
+}
+
+/** "Kandooma, resort, 3.2 kilometers" or "Haa Alifu Dhidhoo". */
+fun islandLabel(isl: Island): String {
+    val f = AppGraph.location.fix
+    val dist = f?.let { ", " + Phrases.distance(Geo.distance(it.lat, it.lon, isl.lat, isl.lon)) } ?: ""
+    return (if (isl.type == "inhabited") isl.fullName else isl.spokenName) + dist
+}
+
+/** Nearest resorts, airports and uninhabited named islands (from the downloaded outlines). */
+class OtherIslandsScreen(private val onPick: (Island) -> Unit) : Screen() {
+    override fun create(): View {
+        val g = AppGraph
+        val (scroll, ui) = UiBuilder.scrolling(host)
+        titleView = ui.title("Resorts, airports and other islands")
+        val f = g.location.fix
+        val list = if (f != null) g.shapes.extras.sortedBy { Geo.distance(f.lat, f.lon, it.lat, it.lon) } else g.shapes.extras.sortedBy { it.name }
+        if (list.isEmpty()) ui.info("None yet. Download island outlines first.")
+        list.take(40).forEach { isl -> ui.button(islandLabel(isl)) { onPick(isl) } }
         ui.button("Back") { host.back() }
         return scroll
     }

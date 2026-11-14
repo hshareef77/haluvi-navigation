@@ -168,10 +168,14 @@ class IslandOutlinesScreen : Screen() {
             return scroll
         }
         progressView = null
-        ui.info(if (g.shapes.isEmpty) "Outlines make island stop announcements exact. Download once; they then work offline."
-            else IslandShapeDownloader.summary().message())
+        val oldRules = g.shapes.formatVersion in 1..2
+        ui.info(when {
+            g.shapes.isEmpty -> "Outlines make island stop announcements exact. Download once; they then work offline."
+            oldRules -> "Your outlines were downloaded with older matching rules. Press Download to update them with the corrected matching."
+            else -> IslandShapeDownloader.summary().message()
+        })
         if (progress.isNotBlank()) ui.info(progress)
-        ui.button(if (g.shapes.isEmpty) "Download" else "Download missing", color = UiColors.BUTTON_ON) { download(full = false) }
+        ui.button(if (g.shapes.isEmpty || oldRules) "Download" else "Download missing", color = UiColors.BUTTON_ON) { download(full = false) }
         val missing = IslandShapeDownloader.missingNames()
         if (missing.isNotEmpty() && !g.shapes.isEmpty) {
             ui.heading("Islands without an outline: ${missing.size}")

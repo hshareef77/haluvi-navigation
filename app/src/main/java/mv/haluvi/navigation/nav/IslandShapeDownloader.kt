@@ -52,7 +52,9 @@ object IslandShapeDownloader {
         running = true
         val failed = ArrayList<String>()
         try {
-            val todo = g.islands.atolls.filter { a -> full || a.code !in g.shapes.atollsDone || a.islands.any { !g.shapes.has(it.key) && it.key !in g.shapes.notOnMap } }
+            // Outlines from version 2.3 or older were matched with older rules: download them all again.
+            if (full || g.shapes.formatVersion in 1..2) g.shapes.clear()
+            val todo = g.islands.atolls.filter { a -> a.code !in g.shapes.atollsDone || a.islands.any { !g.shapes.has(it.key) && it.key !in g.shapes.notOnMap } }
             if (todo.isEmpty()) onProgress("Everything is already downloaded.")
             for ((i, atoll) in todo.withIndex()) {
                 currentCoroutineContext().ensureActive()
@@ -62,8 +64,8 @@ object IslandShapeDownloader {
                     val r = withContext(Dispatchers.IO) { runCatching { matchAtoll(atoll) } }
                     val m = r.getOrNull()
                     if (m != null) {
-                        g.shapes.putAtoll(atoll.code, m.matched, m.others, m.missing, atoll.islands.map { it.key }.toSet())
-                        onProgress("${atoll.fullName}: ${m.matched.size} of ${atoll.islands.size} islands found.")
+                        g.shapes.putAtoll(m)
+                        onProgress("${atoll.fullName}: ${m.islandRing.size} of ${atoll.islands.size} islands found.")
                         ok = true
                         break
                     }
@@ -77,43 +79,95 @@ object IslandShapeDownloader {
         return summary().copy(failedAtolls = failed.ifEmpty { summary().failedAtolls })
     }
 
-    private class AtollMatch(
-        val matched: Map<String, Pair<String, List<LatLon>>>,
-        val others: List<Pair<String, List<LatLon>>>,
-        val missing: Set<String>
-    )
+    /**
+     * Matching rules, in order, for each inhabited island:
+     *  1. an outline with the island's own name within 8 km (Dhivehi spellings understood) - corrects a wrong position;
+     *  2. the outline the island's position is inside (joined islands may share one outline);
+     *  3. the nearest outline within 1.5 km that no other island uses and that has no other island's name;
+     *  4. otherwise no outline: the island keeps its centre point and is marked in the report.
+     */
+    private fun matchAtoll(atoll: Atoll): IslandShapes.AtollData {
+        val g = AppGraph
+        val pad = 0.12 // about 13 km around the atoll's inhabited islands: covers resorts and airports of the atoll
+        val pos = atoll.islands.associate { it.key to (g.shapes.originalPosition(it.key) ?: LatLon(it.lat, it.lon)) }
+        val s = pos.values.minOf { it.lat } - pad
+        val n = pos.values.maxOf { it.lat } + pad
+        val w = pos.values.minOf { it.lon } - pad
+        val e = pos.values.maxOf { it.lon } + pad
+        val outlines = g.osm.islandOutlines(s, w, n, e)
+        val ringIdOf = HashMap<Int, String>()
+        fun ringId(i: Int) = ringIdOf.getOrPut(i) { "ring:${atoll.code}:$i" }
 
-    private fun matchAtoll(atoll: Atoll): AtollMatch {
-        val pad = 0.05 // about 5 km around the atoll's inhabited islands
-        val s = atoll.islands.minOf { it.lat } - pad
-        val n = atoll.islands.maxOf { it.lat } + pad
-        val w = atoll.islands.minOf { it.lon } - pad
-        val e = atoll.islands.maxOf { it.lon } + pad
-        val outlines = AppGraph.osm.islandOutlines(s, w, n, e)
-        val matched = HashMap<String, Pair<String, List<LatLon>>>()
-        val usedRings = HashSet<List<LatLon>>()
-        for (island in atoll.islands) {
-            var best: mv.haluvi.navigation.net.OpenStreetMap.Outline? = null
-            var bestScore = Double.MAX_VALUE
-            for (o in outlines) {
-                val inside = IslandShapes.pointInRing(island.lat, island.lon, o.ring)
-                val d = if (inside) 0.0 else Geo.distanceToPolyline(island.lat, island.lon, o.ring + o.ring.first())
-                if (d > 1500) continue
-                val nameMatch = o.name.isNotBlank() && (o.name.contains(island.name, true) || island.name.contains(o.name, true))
-                var score = d - (if (nameMatch) 400 else 0) - (if (inside) 1000 else 0)
-                if (IslandShapes.area(o.ring) < 5_000) score += 300
-                if (score < bestScore) { bestScore = score; best = o }
-            }
-            best?.let { matched[island.key] = it.name to IslandShapes.simplify(it.ring, 6.0); usedRings.add(it.ring) }
+        val islandRing = HashMap<String, String>()
+        val rings = HashMap<String, List<LatLon>>()
+        val names = HashMap<String, String>()
+        val methods = HashMap<String, String>()
+        val corrected = HashMap<String, Pair<LatLon, Double>>()
+        val warnings = HashMap<String, String>()
+        val usedBy = HashMap<Int, MutableList<String>>()
+
+        fun assign(islandKey: String, idx: Int, method: String) {
+            val o = outlines[idx]
+            val id = ringId(idx)
+            rings[id] = IslandShapes.simplify(o.ring, 6.0)
+            islandRing[islandKey] = id
+            if (o.name.isNotBlank()) names[islandKey] = o.name
+            methods[islandKey] = method
+            usedBy.getOrPut(idx) { ArrayList() }.add(islandKey)
         }
-        // Other named islands (resorts, airports, uninhabited) not matched to an inhabited island.
-        val others = outlines.asSequence()
-            .filter { it.name.isNotBlank() && it.ring !in usedRings && IslandShapes.area(it.ring) >= 2_000 }
+        fun distTo(p: LatLon, idx: Int): Double {
+            val r = outlines[idx].ring
+            return if (IslandShapes.pointInRing(p.lat, p.lon, r)) 0.0 else Geo.distanceToPolyline(p.lat, p.lon, r + r.first())
+        }
+
+        // Pass 1: by name, then inside.
+        for (island in atoll.islands) {
+            val p = pos.getValue(island.key)
+            val byName = outlines.indices.filter { IslandShapes.sameName(outlines[it].name, island.name) }
+                .map { it to distTo(p, it) }.filter { it.second <= 8000 }.minByOrNull { it.second }
+            if (byName != null) {
+                assign(island.key, byName.first, "name")
+                if (byName.second > 150) {
+                    val c = IslandShapes.centroid(outlines[byName.first].ring)
+                    corrected[island.key] = c to Geo.distance(p.lat, p.lon, c.lat, c.lon)
+                }
+                continue
+            }
+            val containing = outlines.indices.filter { IslandShapes.pointInRing(p.lat, p.lon, outlines[it].ring) }
+                .minByOrNull { IslandShapes.area(outlines[it].ring) }
+            if (containing != null) assign(island.key, containing, "inside")
+        }
+        // Pass 2: nearest unused outline without another island's name.
+        val atollNames = atoll.islands.map { it.name }
+        for (island in atoll.islands) {
+            if (islandRing.containsKey(island.key)) continue
+            val p = pos.getValue(island.key)
+            val cand = outlines.indices.filter { idx ->
+                usedBy[idx] == null && outlines[idx].type != "resort" && outlines[idx].type != "airport" &&
+                    atollNames.none { other -> other != island.name && IslandShapes.sameName(outlines[idx].name, other) }
+            }.map { it to distTo(p, it) }.filter { it.second <= 1500 }.minByOrNull { it.second }
+            if (cand != null) {
+                assign(island.key, cand.first, "position")
+                warnings[island.key] = "matched by position only (" + (outlines[cand.first].name.ifBlank { "unnamed outline" }) + ", ${cand.second.toInt()} m away) - please check"
+            }
+        }
+        // Shared outlines: fine for joined islands, but mark them for checking.
+        for ((idx, keys) in usedBy) if (keys.size > 1) {
+            val label = keys.joinToString(", ") { it.substringAfter(":") }
+            for (k in keys) if (!warnings.containsKey(k)) warnings[k] = "shares one outline (${outlines[idx].name.ifBlank { "unnamed" }}) with: $label"
+        }
+        val missing = atoll.islands.map { it.key }.filter { !islandRing.containsKey(it) }.toSet()
+        missing.forEach { warnings[it] = "no outline found - uses the island centre point" }
+
+        // Other named islands (resorts, airports, uninhabited) not used by an inhabited island.
+        val others = outlines.indices.asSequence()
+            .filter { usedBy[it] == null && outlines[it].name.isNotBlank() && IslandShapes.area(outlines[it].ring) >= 2_000 }
+            .map { outlines[it] }
             .distinctBy { it.name.lowercase() + "@" + String.format(java.util.Locale.US, "%.3f,%.3f", IslandShapes.centroid(it.ring).lat, IslandShapes.centroid(it.ring).lon) }
-            .map { it.name to IslandShapes.simplify(it.ring, 8.0) }
+            .map { Triple(it.name, it.type, IslandShapes.simplify(it.ring, 8.0)) }
             .toList()
-        val missing = atoll.islands.filter { !matched.containsKey(it.key) }.map { it.key }.toSet()
-        return AtollMatch(matched, others, missing)
+
+        return IslandShapes.AtollData(atoll.code, atoll.islands.map { it.key }.toSet(), rings, islandRing, names, methods, corrected, warnings, missing, others)
     }
 
     /** Plain-text report of every inhabited island's outline, for checking accuracy. */
@@ -132,15 +186,21 @@ object IslandShapeDownloader {
                     sb.append("  ${isl.name}: NO OUTLINE").append(if (isl.key in g.shapes.notOnMap) " (not on map)" else "").append("\n")
                     continue
                 }
-                val inside = IslandShapes.pointInRing(isl.lat, isl.lon, ring)
-                val off = if (inside) "centre inside" else "centre ${Geo.distanceToPolyline(isl.lat, isl.lon, ring + ring.first()).toInt()} m outside"
                 val size = (IslandShapes.radius(ring) * 2).toInt()
                 val name = g.shapes.osmName(isl.key)?.takeIf { it.isNotBlank() } ?: "no name"
-                sb.append("  ${isl.name}: map name $name, about $size m across, $off, ${ring.size} points\n")
+                val method = when (g.shapes.method(isl.key)) { "name" -> "by name"; "inside" -> "position inside"; "position" -> "by position"; else -> "?" }
+                val corr = g.shapes.correction(isl.key)?.let { ", position corrected by ${it.toInt()} m" } ?: ""
+                val o = g.shapes.originalPosition(isl.key)
+                val now = String.format(java.util.Locale.US, "%.5f,%.5f", isl.lat, isl.lon)
+                val was = o?.let { String.format(java.util.Locale.US, "%.5f,%.5f", it.lat, it.lon) } ?: now
+                sb.append("  ${isl.name}: map name $name, $method, about $size m across$corr, position $now").append(if (was != now) " (was $was)" else "").append("\n")
+                g.shapes.warning(isl.key)?.let { sb.append("    WARNING: $it\n") }
             }
         }
         sb.append("\nOther named islands: ${g.shapes.extras.size}\n")
-        g.shapes.extras.sortedBy { it.name }.forEach { sb.append("  ${it.name}\n") }
+        g.shapes.extras.sortedWith(compareBy({ it.type }, { it.name })).forEach {
+            sb.append("  ${it.name} (${it.type}) ").append(String.format(java.util.Locale.US, "%.4f,%.4f", it.lat, it.lon)).append("\n")
+        }
         return sb.toString()
     }
 }

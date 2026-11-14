@@ -158,7 +158,8 @@ class NavigationEngine(
         return "${Phrases.distance(dist)}, ${Phrases.where(compass.heading, b)}."
     }
 
-    fun currentIsland(): Island? = location.fix?.let { islands.nearest(it.lat, it.lon)?.island }
+    /** The island you are on: the outline you are inside when outlines are downloaded, otherwise the nearest island centre. */
+    fun currentIsland(): Island? = location.fix?.let { shapes.islandAt(it.lat, it.lon) ?: islands.nearest(it.lat, it.lon)?.island }
 
     // =====================================================================
     // Start / stop

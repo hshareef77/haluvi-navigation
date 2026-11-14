@@ -14,6 +14,15 @@ object WhereAmI {
             else "GPS is not ready yet. Please wait a moment in an open area and try again."
 
         val islandHit = g.islands.nearest(f.lat, f.lon)
+        // With outlines: the island you are really on (also resorts and airports), or "at sea".
+        val onIsland = g.shapes.islandAt(f.lat, f.lon)
+        val islandText = when {
+            onIsland != null -> "On ${onIsland.spokenName}."
+            !g.shapes.isEmpty && g.islandWatcher.atSea(f) -> g.shapes.nearby(f.lat, f.lon, 20_000.0).firstOrNull()?.let {
+                "At sea, ${Phrases.distance(it.shore)} from ${it.island.spokenName}."
+            } ?: "At sea."
+            else -> null
+        }
         val saved = g.store.nearest(f.lat, f.lon).firstOrNull()
         val parts = ArrayList<String>()
 
@@ -28,8 +37,8 @@ object WhereAmI {
                 parts.add("Near ${place.name}, ${Phrases.distance(place.distance)} $where.")
             }
             if (geo != null && geo.road.isNotBlank()) parts.add("On ${geo.road}.")
-            val island = geo?.island?.takeIf { it.isNotBlank() } ?: islandHit?.island?.fullName
-            if (!island.isNullOrBlank()) parts.add("$island.")
+            val island = islandText ?: (geo?.island?.takeIf { it.isNotBlank() } ?: islandHit?.island?.fullName)?.let { "$it." }
+            if (!island.isNullOrBlank()) parts.add(island)
         }
 
         if (parts.isEmpty()) {
@@ -37,7 +46,7 @@ object WhereAmI {
                 val where = Phrases.where(g.compass.heading, saved.bearing)
                 parts.add(if (saved.distance <= 15) "At ${saved.loc.name}." else "Near ${saved.loc.name}, ${Phrases.distance(saved.distance)} $where.")
             }
-            if (islandHit != null) parts.add("${islandHit.island.fullName}.")
+            if (islandText != null) parts.add(islandText) else if (islandHit != null) parts.add("${islandHit.island.fullName}.")
             if (parts.isEmpty()) parts.add("Your GPS position is available, but no place name was found.")
         }
         if (f.accuracy > 40) parts.add("GPS is weak, about ${Fmt.meters(f.accuracy)}.")

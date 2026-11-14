@@ -8,7 +8,18 @@ data class Atoll(val index: Int, val name: String, val code: String, val fullNam
     val label: String get() = "$fullName ($code), $name"
 }
 
-data class Island(val atollIndex: Int, val index: Int, val name: String, val lat: Double, val lon: Double) {
+data class Island(val atollIndex: Int, val index: Int, val name: String, var lat: Double, var lon: Double) {
+    /** "inhabited", "resort", "airport" or "island" (uninhabited). */
+    var type: String = "inhabited"
+
+    /** Name with its kind for announcements: "Kandooma, resort". Inhabited islands are said by name only. */
+    val spokenName: String get() = when (type) {
+        "resort" -> "$name, resort"
+        "airport" -> "$name, airport"
+        "island" -> "$name, uninhabited island"
+        else -> name
+    }
+
     /** Stable key, independent of list order: "HA:Dhidhoo". */
     var key: String = ""
         internal set
