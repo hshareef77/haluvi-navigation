@@ -37,7 +37,8 @@ class NavigationService : Service() {
         }
 
         fun updateOrStop(context: Context) {
-            if (!AppGraph.nav.isActive && !AppGraph.explore.active && !AppGraph.settings.islandAlertsOn) {
+            val g = AppGraph
+            if (!g.nav.isActive && !g.explore.active && !g.settings.islandAlertsOn && !g.routeTrip.active && !g.routeRecorder.active) {
                 if (running) context.stopService(Intent(context, NavigationService::class.java))
             }
         }
@@ -52,7 +53,7 @@ class NavigationService : Service() {
     private val fixListener: (mv.haluvi.navigation.sensors.Fix) -> Unit = { f ->
         val g = AppGraph
         val ms = when {
-            g.uiVisible || g.nav.isActive || g.explore.active -> 1000L
+            g.uiVisible || g.nav.isActive || g.explore.active || g.routeTrip.active || g.routeRecorder.active -> 1000L
             g.islandWatcher.recentlyAtSea() || (f.speedMps ?: 0.0) >= 2.0 -> 2000L
             else -> 20_000L
         }
@@ -71,6 +72,8 @@ class NavigationService : Service() {
         if (intent?.action == ACTION_STOP) {
             AppGraph.nav.stop()
             AppGraph.explore.stop()
+            AppGraph.routeTrip.stop(silent = true)
+            AppGraph.routeRecorder.finish()?.let { AppGraph.routes.add(it) }
             AppGraph.settings.islandAlertsOn = false
             stopSelf()
             return START_NOT_STICKY
@@ -88,6 +91,8 @@ class NavigationService : Service() {
             AppGraph.location.acquire()
             AppGraph.nav.addListener(changeListener)
             AppGraph.explore.addListener(changeListener)
+            AppGraph.routeTrip.addListener(changeListener)
+            AppGraph.routeRecorder.addListener(changeListener)
             AppGraph.location.addListener(fixListener)
         }
         syncResources()
@@ -124,6 +129,8 @@ class NavigationService : Service() {
             running = false
             AppGraph.nav.removeListener(changeListener)
             AppGraph.explore.removeListener(changeListener)
+            AppGraph.routeTrip.removeListener(changeListener)
+            AppGraph.routeRecorder.removeListener(changeListener)
             AppGraph.location.removeListener(fixListener)
             AppGraph.location.setInterval(1000L)
             AppGraph.location.release()
@@ -145,6 +152,8 @@ class NavigationService : Service() {
         val explore = AppGraph.explore
         return when {
             nav.isActive -> nav.notificationText().ifBlank { "Navigating" }
+            AppGraph.routeTrip.active -> AppGraph.routeTrip.repeatText()
+            AppGraph.routeRecorder.active -> "Recording route ${AppGraph.routeRecorder.name}. ${AppGraph.routeRecorder.status}"
             explore.active -> explore.statusText + (if (explore.roadText.isNotBlank()) " " + explore.roadText else "")
             AppGraph.settings.islandAlertsOn -> AppGraph.islandWatcher.lastMessage.ifBlank { "Watching for islands when you travel by sea." }
             else -> "Ready"

@@ -79,7 +79,19 @@ class NavigationEngine(
     var altitudeText = ""; private set
     var gpsText = ""; private set
     var routeMessage = ""; private set
+
+    /** One short line: what kind of guidance is used now. */
+    val guidanceText: String get() {
+        val t = target ?: return ""
+        if (t.kind == NavKind.ISLAND) return "Guidance: island trip, direct."
+        val r = route ?: return if (routeBusy) "Guidance: finding a route." else "Guidance: direct, no route."
+        return if (r.source == "Offline") "Guidance: offline route." else "Guidance: Google route."
+    }
     var lastArrivalText = ""; private set
+    /** The destination of the last finished trip (for Go back to start and Save this place). */
+    var lastArrived: Destination? = null; private set
+    /** Where the last trip started (for Go back to start). */
+    var lastStart: mv.haluvi.navigation.core.LatLon? = null; private set
 
     var route: Route? = null; private set
     var stepIndex = 0; private set
@@ -154,7 +166,9 @@ class NavigationEngine(
         if (fromLat != null && fromLon != null) {
             val dist = Geo.distance(fromLat, fromLon, d.lat, d.lon)
             val b = Geo.bearing(fromLat, fromLon, d.lat, d.lon)
-            return "${Phrases.distance(dist)}, ${Geo.directionName(b)}, ${Geo.degreesInt(b)} degrees."
+            // From another place your facing direction is unknown, so a clock position cannot be given.
+            return if (settings.clockDirections) "${Phrases.distance(dist)}, towards the ${Geo.directionName(b).lowercase()}."
+            else "${Phrases.distance(dist)}, ${Geo.directionName(b)}, ${Geo.degreesInt(b)} degrees."
         }
         val f = location.fix ?: return "Waiting for GPS."
         val dist = Geo.distance(f.lat, f.lon, d.lat, d.lon)
@@ -174,6 +188,7 @@ class NavigationEngine(
         target = d
         startedMs = now
         lastArrivalText = ""
+        lastStart = location.fix?.let { mv.haluvi.navigation.core.LatLon(it.lat, it.lon) }
         instructionText = "Starting."
         NavigationService.ensureRunning(context)
         haptics.tick()
@@ -250,14 +265,14 @@ class NavigationEngine(
         updateLockedSide(f, t, effDist, route)
         if (confirmArrival(effDist, f, speed)) { arrive(t, f); return }
 
-        directionText = "Destination ${Phrases.where(heading, bearing)}."
+        directionText = ""
         val r = route
         if (t.kind == NavKind.PLACE && r != null) {
             routeTick(f, r, speed)
         } else {
             val eta = if (speed != null && speed >= 0.3) ", about ${Fmt.duration(dist / speed)}" else ""
             distanceText = "${Phrases.distance(dist)} left$eta."
-            instructionText = "${t.name}, ${Phrases.where(heading, bearing).removePrefix("at ")}, ${Phrases.distance(dist)}."
+            instructionText = "Destination ${Phrases.where(heading, bearing)}."
             directDistanceSpeech(t, dist, bearing, heading)
             if (t.kind == NavKind.PLACE) maybeRequestRoute(f)
         }
@@ -349,7 +364,9 @@ class NavigationEngine(
         if (nearEnough && goingAway && Geo.relativeSide(heading, bearing) == "behind") {
             passedAnnounced = true
             approachSpoken.clear(); lockedSide = null; lockedRank = 0
-            speaker.speak("You passed ${t.name}. It is ${Phrases.distance(d)} behind you. Turn around when safe.")
+            val passedText = "You passed ${t.name}. It is ${Phrases.distance(d)} behind you. Turn around when safe."
+            speaker.speak(passedText)
+            mv.haluvi.navigation.feedback.TripAlerts.alert(context, passedText)
             if (route != null) location.fix?.let { maybeRequestRoute(it, force = true) }
         }
     }
@@ -432,7 +449,7 @@ class NavigationEngine(
 
     private fun arrive(t: Destination, f: Fix?) {
         val text = when {
-            t.kind == NavKind.ISLAND -> "Arrived at your destination, ${t.name}."
+            t.kind == NavKind.ISLAND -> "Arrived at ${t.name}."
             f == null -> "Arrived at ${t.name}."
             else -> {
                 val side = lockedSide ?: sideNow(f, t, route)?.first?.takeIf { it != "behind" }
@@ -447,7 +464,9 @@ class NavigationEngine(
         }
         clearActiveState()
         lastArrivalText = text
+        lastArrived = t
         speaker.speak(text)
+        mv.haluvi.navigation.feedback.TripAlerts.alert(context, text)
         haptics.arrival()
         NavigationService.updateOrStop(context)
         notifyChanged()
@@ -625,7 +644,7 @@ class NavigationEngine(
         } else {
             if (d != null) "In ${Phrases.distance(d.toDouble())}, $arriveText." else "Continue to destination."
         }
-        current?.let { stepBearing(it) }?.let { b -> directionText = "Road direction ${Phrases.where(compass.heading, b)}." }
+        current?.let { stepBearing(it) }?.let { b -> directionText = "The road goes towards ${Phrases.where(compass.heading, b).removePrefix("at ")}." }
 
         // ---- spoken guidance ----
         if (announceFirst) {

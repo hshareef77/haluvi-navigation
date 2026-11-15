@@ -75,6 +75,7 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
         ui.info("Island outlines, roads and places for use without internet. $count islands downloaded.")
         if (OfflineDownload.lastResult.isNotBlank()) ui.info(OfflineDownload.lastResult)
 
+        ui.heading("Download")
         val mine = OfflineMaps.myIsland()
         if (mine != null) {
             ui.button("My island: ${mine.name}" + if (OfflineMaps.status(mine.key) != null) ". Update" else ". Download", color = UiColors.BUTTON_ON) {
@@ -95,11 +96,13 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
                 }
             }
         }
+        ui.heading("More")
         ui.button("Get Google places") { host.show { GooglePlacesScreen() } }
-        ui.button("Share offline maps report") { shareText(host, "Haluvi offline maps report", OfflineMaps.report()) }
-        ui.button("Island outlines details") { host.show { IslandOutlinesScreen() } }
         ui.button("Name this road") { host.show { RoadNameScreen() } }
         ui.button("My road names: ${AppGraph.store.roadNames.all().size}") { host.show { MyRoadNamesScreen() } }
+        ui.heading("Advanced")
+        ui.button("Island outlines details") { host.show { IslandOutlinesScreen() } }
+        ui.button("Share offline maps report") { shareText(host, "Haluvi offline maps report", OfflineMaps.report()) }
         ui.info("Map data © OpenStreetMap contributors.")
         ui.button("Back") { host.back() }
         return scroll

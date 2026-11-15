@@ -4,13 +4,19 @@ An accessible GPS navigation app for blind and low vision travellers in the Mald
 It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of its final (v130) features.
 
 ## Features
-- **Home**: Where am I, Places, Islands, Explore, My places, Settings.
+- **Home**: Where am I, Places, Islands, Routes, Explore, My places, Settings.
 - **Places** (walking or driving): From (my location or a saved place), To (my places, search, what's around me), Start.
 - **Islands** (sea or air): From (GPS island or chosen), To (any of the 200 inhabited islands), Start.
   - Island stop announcements: "Approaching …", "Arrived at …" (ferry stop), "Passing …".
   - Exact with island outlines, downloaded once in the app from OpenStreetMap (continues where it stopped,
     lists missing islands, includes other named islands such as resorts, shareable report).
   - Island alerts in background: announcements and notifications at sea without opening the app.
+- **Routes** (bus, ferry or both): stops in order, each a place or an island (islands use their outline).
+  Make a route, or record it while riding (the app asks to save each stop when the vehicle stops).
+  While travelling: next stop, approaching, stopping at, passed, "Your stop is next", "Your stop is coming",
+  "Arrived at your stop". Works in the background.
+- **Trip alerts**: arrived, passed, island and route stop announcements are also shown as notifications
+  when the app is not on screen (places, islands and routes alike).
 - **While navigating**: the next instruction, distance and time, Repeat, What's in this direction, Stop.
   - Google road routes (optional) with spoken turn instructions and automatic re-route.
   - Offline routes calculated on the phone from downloaded roads (no internet), with turn, count and
@@ -24,7 +30,8 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
 - **Name this road**: walk 30 m along an unnamed downloaded road (away from junctions) and give it a name.
   Your names are used in Explore and offline routes, and are kept when the offline map is updated.
 - **What's around me**: nearest places with clock positions, by category.
-- **My places**: save, edit, delete, download island map (places and roads), import, export.
+- **My places**: save, edit, delete, download island map (places and roads). One backup file (export and
+  import) holds places, your road names and routes.
 - **Get Google places** (optional): all places Google Maps has on an island, of every kind. The island is
   covered square by square and busy squares are split until nothing is missed; you choose which to save.
 - Uses your default speech engine at accessibility volume; keeps guiding with the screen off.

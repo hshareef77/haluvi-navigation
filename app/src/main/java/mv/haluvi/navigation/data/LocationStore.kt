@@ -241,7 +241,8 @@ class LocationStore(private val context: Context, private val islands: IslandRep
     fun exportJson(): String {
         val arr = JSONArray()
         _items.forEach { arr.put(it.toJson()) }
-        return JSONObject().put("app", "Haluvi Navigation").put("version", 1).put("locations", arr).toString(2)
+        return JSONObject().put("app", "Haluvi Navigation").put("version", 2).put("locations", arr)
+            .put("roadNames", roadNames.exportJson()).toString(2)
     }
 
     /**
@@ -249,14 +250,20 @@ class LocationStore(private val context: Context, private val islands: IslandRep
      * (pipe separated: id|name|lat|lon|accuracy|savedTime|road|island|atoll|dist|source|categoryId|...).
      * Returns (added, skipped).
      */
+    /** Road names found in the last imported backup file. */
+    var lastImportedRoadNames = 0; private set
+
     @Synchronized
     fun import(text: String): Pair<Int, Int> {
+        lastImportedRoadNames = 0
         var added = 0
         var skipped = 0
         val parsed = ArrayList<SavedLocation>()
         val trimmed = text.trim()
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-            val arr = if (trimmed.startsWith("{")) JSONObject(trimmed).optJSONArray("locations") ?: JSONArray() else JSONArray(trimmed)
+            val root = if (trimmed.startsWith("{")) JSONObject(trimmed) else null
+            val arr = root?.let { it.optJSONArray("locations") ?: JSONArray() } ?: JSONArray(trimmed)
+            root?.optJSONArray("roadNames")?.let { lastImportedRoadNames = roadNames.importJson(it) }
             for (i in 0 until arr.length()) SavedLocation.fromJson(arr.getJSONObject(i))?.let { parsed.add(it) }
         } else {
             trimmed.lineSequence().forEach { line ->

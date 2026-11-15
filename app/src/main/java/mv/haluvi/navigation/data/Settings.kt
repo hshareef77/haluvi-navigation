@@ -33,6 +33,10 @@ class Settings(context: Context) {
     var keepAwake by bool("keepAwake", false)
     var arrivalDistance by int("arrivalDistance", 10)
     var islandArrivalDistance by int("islandArrivalDistance", 1000)
+    /** Routes: announce every stop (true) or only your own stop (false). */
+    var routeAnnounceAll by bool("routeAnnounceAll", true)
+    /** Routes: "Your stop is coming" this many metres before a place stop. */
+    var routeWarnMeters by int("routeWarnMeters", 200)
     /** "Approaching / Arrived at / Passing" island announcements during island trips and Explore at sea. */
     var islandStopAnnouncementsOn by bool("islandStopAnnouncementsOn", true)
     /** Background island alerts: announcements and notifications at sea without opening the app. */

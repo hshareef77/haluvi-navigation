@@ -18,8 +18,15 @@ object Selection {
     var islandTo: Island? = null
 }
 
+/** When set, the next place chosen in Search, What's around me or My places goes here (route stops). */
+object PlacePick {
+    var handler: ((SavedLocation) -> Unit)? = null
+}
+
 /** Sets the Places destination and opens the Places screen (used by every place picker). */
 fun goToPlace(host: MainActivity, loc: SavedLocation) {
+    // A route editor is choosing a stop: give it the place instead of going there.
+    PlacePick.handler?.let { h -> PlacePick.handler = null; h(loc); return }
     Selection.placeTo = loc
     host.say("To: ${loc.name}")
     host.showTrip { PlacesScreen() }
@@ -45,7 +52,7 @@ class PlacesScreen : Screen() {
             } }
         }
         val to = Selection.placeTo
-        ui.button("To: " + (to?.name ?: "choose")) { host.show { ChooseToScreen() } }
+        ui.button("To: " + (to?.name ?: "not chosen")) { host.show { ChooseToScreen() } }
         preview = to?.let { ui.info(previewText(it)) }
         ui.button("Travel: ${s.travelMode.label}") {
             s.travelMode = if (s.travelMode == TravelMode.WALKING) TravelMode.DRIVING else TravelMode.WALKING
@@ -64,7 +71,6 @@ class PlacesScreen : Screen() {
         if (to != null && g.store.byId(to.id) == null && g.store.findDuplicate(to.name, to.lat, to.lon) == null) {
             ui.button("Save ${to.name} to my places") { g.store.add(to); host.speak("Saved."); rebuild() }
         }
-        ui.button("What's around me") { host.show { AroundMeScreen() } }
         ui.button("Back") { host.back() }
         return scroll
     }
@@ -117,7 +123,7 @@ class IslandsScreen : Screen() {
             }
         }
         val to = Selection.islandTo
-        ui.button("To: " + (to?.fullName ?: "choose island")) {
+        ui.button("To: " + (to?.fullName ?: "not chosen")) {
             host.show { AtollPickerScreen { isl -> Selection.islandTo = isl; host.say("To: ${isl.name}"); host.backTo(this@IslandsScreen) } }
         }
         preview = to?.let { ui.info(previewText(it)) }
@@ -135,10 +141,6 @@ class IslandsScreen : Screen() {
             }
         }
         islandAlertsToggle(this, ui)
-        if (g.shapes.isEmpty) {
-            ui.info("For exact island stop announcements, download offline maps once.")
-            ui.button("Offline maps") { host.show { OfflineMapsScreen() } }
-        } else ui.button("Offline maps") { host.show { OfflineMapsScreen() } }
         ui.button("Back") { host.back() }
         return scroll
     }

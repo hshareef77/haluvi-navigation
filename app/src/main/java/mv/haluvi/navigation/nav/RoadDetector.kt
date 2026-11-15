@@ -59,6 +59,14 @@ object RoadDetector {
         return best
     }
 
+    /** Name of the downloaded road you are on (your own name or the map's), within 15 m; null if unnamed or none. */
+    fun roadNameAt(lat: Double, lon: Double): String? {
+        val (_, rs) = roadsAt(lat, lon) ?: return null
+        val n = nearest(lat, lon, rs) ?: return null
+        if (n.dist > NEAR_ROAD_M) return null
+        return rs[n.road].name.takeIf { it.isNotBlank() }
+    }
+
     /** Direction of the nearest downloaded road (one of its two directions), when you are within 15 m of it. */
     fun roadDirectionAt(f: Fix): Double? {
         val (_, rs) = roadsAt(f.lat, f.lon) ?: return null

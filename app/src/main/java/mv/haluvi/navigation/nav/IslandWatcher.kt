@@ -152,30 +152,7 @@ class IslandWatcher(
     private fun announce(text: String, flush: Boolean) {
         lastMessage = text
         speaker.speak(text, flush = flush)
-        if (!AppGraph.uiVisible) notify(text)
-    }
-
-    private var notifyId = 100
-
-    /** Shows the announcement as a notification too, so it can be read later without opening the app. */
-    private fun notify(text: String) {
-        runCatching {
-            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (Build.VERSION.SDK_INT >= 26) {
-                nm.createNotificationChannel(NotificationChannel("island_alerts", "Island alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                    description = "Approaching, arrived at and passing islands"
-                    setSound(null, null)
-                })
-            }
-            val open = PendingIntent.getActivity(context, 2, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(context, "island_alerts")
-            else @Suppress("DEPRECATION") android.app.Notification.Builder(context)
-            val n = b.setSmallIcon(R.drawable.ic_notification).setContentTitle(text).setContentText("Haluvi Navigation")
-                .setContentIntent(open).setAutoCancel(true).setWhen(System.currentTimeMillis()).setShowWhen(true).build()
-            notifyId = if (notifyId >= 120) 100 else notifyId + 1
-            nm.notify(notifyId, n)
-        }
+        mv.haluvi.navigation.feedback.TripAlerts.alert(context, text)
     }
 
     fun reset() { visits.clear(); lastMessage = "" }

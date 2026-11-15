@@ -36,7 +36,8 @@ object WhereAmI {
                 val where = Phrases.where(g.compass.heading, Geo.bearing(f.lat, f.lon, place.lat, place.lon))
                 parts.add("Near ${place.name}, ${Phrases.distance(place.distance)} $where.")
             }
-            if (geo != null && geo.road.isNotBlank()) parts.add("On ${geo.road}.")
+            val road = geo?.road?.takeIf { it.isNotBlank() } ?: RoadDetector.roadNameAt(f.lat, f.lon)
+            if (road != null) parts.add("On $road.")
             val island = islandText ?: (geo?.island?.takeIf { it.isNotBlank() } ?: islandHit?.island?.fullName)?.let { "$it." }
             if (!island.isNullOrBlank()) parts.add(island)
         }
@@ -46,6 +47,7 @@ object WhereAmI {
                 val where = Phrases.where(g.compass.heading, saved.bearing)
                 parts.add(if (saved.distance <= 15) "At ${saved.loc.name}." else "Near ${saved.loc.name}, ${Phrases.distance(saved.distance)} $where.")
             }
+            RoadDetector.roadNameAt(f.lat, f.lon)?.let { parts.add("On $it.") }
             if (islandText != null) parts.add(islandText) else if (islandHit != null) parts.add("${islandHit.island.fullName}.")
             if (parts.isEmpty()) parts.add("Your GPS position is available, but no place name was found.")
         }

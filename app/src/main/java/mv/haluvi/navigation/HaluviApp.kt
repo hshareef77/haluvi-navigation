@@ -37,6 +37,9 @@ object AppGraph {
     lateinit var nav: NavigationEngine; private set
     lateinit var explore: ExploreEngine; private set
     lateinit var islandWatcher: IslandWatcher; private set
+    lateinit var routes: mv.haluvi.navigation.data.TripRoutes; private set
+    lateinit var routeTrip: mv.haluvi.navigation.nav.RouteTrip; private set
+    lateinit var routeRecorder: mv.haluvi.navigation.nav.RouteRecorder; private set
 
     /** True while the app's screen is visible (notifications are then not needed). */
     @Volatile var uiVisible = false
@@ -59,6 +62,9 @@ object AppGraph {
         explore = ExploreEngine(app, settings, islands, store, location, speaker, google, nav)
         islandWatcher = IslandWatcher(app, settings, shapes, location, speaker, haptics, nav) { explore.active }
         explore.atSea = { f -> islandWatcher.atSea(f) }
+        routes = mv.haluvi.navigation.data.TripRoutes(java.io.File(app.filesDir, "routes.json"))
+        routeTrip = mv.haluvi.navigation.nav.RouteTrip(app)
+        routeRecorder = mv.haluvi.navigation.nav.RouteRecorder(app)
         location.addListener { f -> mv.haluvi.navigation.nav.RoadDetector.onFix(f) }
         compass.onCalibrationNeeded = {
             if (nav.isActive || explore.active) speaker.speak("Compass needs calibration. Move the phone in a figure eight.", flush = false)

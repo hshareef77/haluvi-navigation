@@ -17,7 +17,7 @@ private fun onOff(b: Boolean) = if (b) "On" else "Off"
 private fun Screen.toggle(ui: UiBuilder, label: String, get: () -> Boolean, set: (Boolean) -> Unit) {
     ui.button("$label: ${onOff(get())}") {
         set(!get())
-        host.say("$label ${if (get()) "on" else "off"}")
+        host.say("${label.substringBefore(",")} ${if (get()) "on" else "off"}")
         rebuild()
     }
 }
@@ -74,9 +74,7 @@ class VoiceSettingsScreen : Screen() {
         ui.button("Test voice") { g.speaker.speak("This is Haluvi Navigation.", force = true) }
         ui.button("Reconnect speech engine") { g.speaker.connect(); host.say("Speech engine reconnected") }
         toggle(ui, "Vibration", { s.vibrationOn }) { s.vibrationOn = it; if (!it) g.haptics.stopFocus() }
-        ui.button("Pointing vibration: ${s.focusVibration}") {
-            host.show { VibrationPatternScreen("Pointing vibration", s.focusVibration, true) { s.focusVibration = it } }
-        }
+        ui.button("Pointing: vibration and accuracy") { host.show { PointingSettingsScreen() } }
         ui.button("Arrival vibration: ${s.arrivalVibration}") {
             host.show { VibrationPatternScreen("Arrival vibration", s.arrivalVibration, false) { s.arrivalVibration = it } }
         }
@@ -90,6 +88,7 @@ class NavigationSettingsScreen : Screen() {
         val s = AppGraph.settings
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title("Navigation")
+        ui.heading("Walking and driving")
         ui.button("Travel mode: ${s.travelMode.label}") {
             s.travelMode = if (s.travelMode == TravelMode.WALKING) TravelMode.DRIVING else TravelMode.WALKING
             AppGraph.nav.refreshRoute()
@@ -102,23 +101,45 @@ class NavigationSettingsScreen : Screen() {
             host.say(if (s.clockDirections) "Directions as clock positions" else "Directions as compass degrees")
             rebuild()
         }
+        toggle(ui, "Turn instructions, like turn right in 50 meters", { s.turnAnnouncementsOn }) { s.turnAnnouncementsOn = it }
+        toggle(ui, "Direction hints without a route, like turn a little left", { s.directionVoiceHintsOn }) { s.directionVoiceHintsOn = it }
+        ui.button("Arrival distance: ${Phrases.distance(s.arrivalDistance.toDouble())}") {
+            host.show(Pickers.meters(host, "Arrival distance", listOf(5, 10, 15, 20, 30, 50), s.arrivalDistance) { s.arrivalDistance = it })
+        }
+        ui.button("Pointing: vibration and accuracy") { host.show { PointingSettingsScreen() } }
         toggle(ui, "Miles too", { s.milesToo }) { s.milesToo = it }
-        toggle(ui, "Spoken turn instructions", { s.turnAnnouncementsOn }) { s.turnAnnouncementsOn = it }
+
+        ui.heading("Islands and alerts")
+        toggle(ui, "Island stop announcements", { s.islandStopAnnouncementsOn }) { s.islandStopAnnouncementsOn = it }
+        islandAlertsToggle(this, ui)
+        ui.button("Route settings") { host.show { RouteSettingsScreen() } }
+
+        ui.heading("Advanced")
+        ui.button("Island arrival without an outline: ${Phrases.distance(s.islandArrivalDistance.toDouble())}") {
+            host.show(Pickers.meters(host, "Island arrival without an outline", listOf(300, 500, 1000, 2000), s.islandArrivalDistance) { s.islandArrivalDistance = it })
+        }
+        ui.info("Islands with an outline (all inhabited islands) use the shore instead of this distance.")
+        toggle(ui, "Keep screen on", { s.keepAwake }) { s.keepAwake = it }
+        ui.button("Refresh GPS") { AppGraph.location.restart(); host.say("GPS refreshed") }
+        ui.button("Back") { host.back() }
+        return scroll
+    }
+}
+
+/** The phone vibrates while it points at the destination: pattern and accuracy together. */
+class PointingSettingsScreen : Screen() {
+    override fun create(): View {
+        val s = AppGraph.settings
+        val (scroll, ui) = UiBuilder.scrolling(host)
+        titleView = ui.title("Pointing")
+        ui.info("While navigating, the phone vibrates when it points at the destination.")
+        ui.button("Pointing vibration: ${s.focusVibration}") {
+            host.show { VibrationPatternScreen("Pointing vibration", s.focusVibration, true) { s.focusVibration = it } }
+        }
         ui.button("Pointing accuracy: ${s.focusAccuracy} degrees") {
             host.show(Pickers.number(host, "Pointing accuracy", "The phone vibrates when it points at the destination within this many degrees.",
                 listOf(1, 2, 3, 5, 10, 15), s.focusAccuracy, { "$it degree" + if (it == 1) "" else "s" }) { s.focusAccuracy = it })
         }
-        toggle(ui, "Turn hints by voice", { s.directionVoiceHintsOn }) { s.directionVoiceHintsOn = it }
-        ui.button("Arrival distance: ${Phrases.distance(s.arrivalDistance.toDouble())}") {
-            host.show(Pickers.meters(host, "Arrival distance", listOf(5, 10, 15, 20, 30, 50), s.arrivalDistance) { s.arrivalDistance = it })
-        }
-        ui.button("Island arrival: ${Phrases.distance(s.islandArrivalDistance.toDouble())}") {
-            host.show(Pickers.meters(host, "Island arrival distance", listOf(300, 500, 1000, 2000), s.islandArrivalDistance) { s.islandArrivalDistance = it })
-        }
-        toggle(ui, "Island stop announcements", { s.islandStopAnnouncementsOn }) { s.islandStopAnnouncementsOn = it }
-        islandAlertsToggle(this, ui)
-        toggle(ui, "Keep screen on", { s.keepAwake }) { s.keepAwake = it }
-        ui.button("Refresh GPS") { AppGraph.location.restart(); host.say("GPS refreshed") }
         ui.button("Back") { host.back() }
         return scroll
     }

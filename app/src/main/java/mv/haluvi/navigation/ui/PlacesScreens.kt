@@ -36,10 +36,16 @@ class MyPlacesScreen(
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title(title)
         firstChoice?.let { (label, action) -> ui.button(label) { action() } }
-        if (!forGoTo) {
-            ui.button("Save this place") { host.show { SavePlaceScreen() } }
-            ui.button("Offline maps") { host.show { OfflineMapsScreen() } }
-            ui.button("Get Google places") { host.show { GooglePlacesScreen() } }
+        if (!forGoTo) ui.button("Add and manage") {
+            host.show {
+                ChoiceScreen("Add and manage", null, listOf(
+                    "Save this place" to { host.show { SavePlaceScreen() } },
+                    "Offline maps" to { host.show { OfflineMapsScreen() } },
+                    "Get Google places" to { host.show { GooglePlacesScreen() } },
+                    "Import backup" to { host.back(); importPlaces() },
+                    "Export backup: places, road names and routes" to { host.back(); exportPlaces() }
+                ))
+            }
         }
         val edit = ui.edit("Find in my places", query) { query = it.trim(); limit = 40; rebuild() }
         ui.row("Find" to { query = edit.text.toString().trim(); limit = 40; rebuild() }, "Clear" to { query = ""; rebuild() })
@@ -57,9 +63,6 @@ class MyPlacesScreen(
             }
         }
         if (rows.size > limit) ui.button("More places") { limit += 40; rebuild() }
-        if (!forGoTo) {
-            ui.row("Import" to { importPlaces() }, "Export" to { exportPlaces() })
-        }
         ui.button("Back") { host.back() }
         return scroll
     }
@@ -71,11 +74,19 @@ class MyPlacesScreen(
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
                         val text = host.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
-                        AppGraph.store.import(text)
+                        val places = AppGraph.store.import(text)
+                        val routes = runCatching {
+                            org.json.JSONObject(text.trim()).optJSONArray("routes")?.let { AppGraph.routes.import(it) }
+                        }.getOrNull()
+                        Triple(places, AppGraph.store.lastImportedRoadNames, routes)
                     }
                 }
-                result.onSuccess { (added, skipped) ->
-                    host.speak("$added places imported." + if (skipped > 0) " $skipped already saved." else "")
+                result.onSuccess { (places, roads, routes) ->
+                    val (added, skipped) = places
+                    if (roads > 0) mv.haluvi.navigation.nav.RoadDetector.version++
+                    host.speak("$added places imported." + (if (skipped > 0) " $skipped already saved." else "") +
+                        (if (roads > 0) " $roads road names imported." else "") +
+                        (routes?.let { (ra, rs) -> (if (ra > 0) " $ra routes imported." else "") + (if (rs > 0) " $rs routes already saved." else "") } ?: ""))
                     rebuild()
                 }.onFailure { host.speak("This file could not be imported.") }
             }
@@ -83,13 +94,16 @@ class MyPlacesScreen(
     }
 
     private fun exportPlaces() {
-        host.createFile("haluvi-places.json", "application/json") { uri ->
+        host.createFile("haluvi-backup.json", "application/json") { uri ->
             if (uri == null) return@createFile
             host.scope.launch {
                 val ok = withContext(Dispatchers.IO) {
-                    runCatching { host.contentResolver.openOutputStream(uri)?.use { it.write(AppGraph.store.exportJson().toByteArray()) } }.isSuccess
+                    runCatching {
+                        val json = org.json.JSONObject(AppGraph.store.exportJson()).put("routes", AppGraph.routes.exportJson()).toString(2)
+                        host.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
+                    }.isSuccess
                 }
-                host.speak(if (ok) "Places exported." else "Export failed.")
+                host.speak(if (ok) "Exported: places, road names and routes." else "Export failed.")
             }
         }
     }

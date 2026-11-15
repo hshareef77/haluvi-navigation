@@ -17,6 +17,7 @@ class HomeScreen : Screen() {
         val g = AppGraph
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title("Haluvi Navigation")
+        PlacePick.handler = null
         addPermissionWarning(host, ui)
         g.nav.target?.let { t ->
             ui.button("Going to ${t.name}. Open", color = UiColors.BUTTON_ON) { host.show { NavigationScreen() } }
@@ -24,7 +25,8 @@ class HomeScreen : Screen() {
         ui.button("Where am I") { whereAmI(host) }
         ui.button("Places") { host.show { PlacesScreen() } }
         ui.button("Islands") { host.show { IslandsScreen() } }
-        ui.button(if (g.explore.active) "Explore: On" else "Explore: Off") { host.show { ExploreScreen() } }
+        ui.button("Routes" + (g.routeTrip.activeRouteName?.let { ", travelling: $it" } ?: "")) { host.show { RoutesScreen() } }
+        ui.button(if (g.explore.active) "Explore, running" else "Explore") { host.show { ExploreScreen() } }
         ui.button("My places") { host.show { MyPlacesScreen() } }
         ui.button("Settings") { host.show { SettingsScreen() } }
         return scroll
@@ -35,6 +37,12 @@ class HomeScreen : Screen() {
         val navOn = AppGraph.nav.isActive
         if (navOn != lastNav || AppGraph.explore.active != lastExplore) { lastNav = navOn; lastExplore = AppGraph.explore.active; rebuild() }
     }
+
+    override fun onSecond() {
+        if (AppGraph.routeTrip.active != lastRoute) { lastRoute = AppGraph.routeTrip.active; rebuild() }
+    }
+
+    private var lastRoute = AppGraph.routeTrip.active
 
     private var lastNav = AppGraph.nav.isActive
     private var lastExplore = AppGraph.explore.active
@@ -55,11 +63,11 @@ fun whereAmI(host: MainActivity) {
     host.scope.launch { host.speak(WhereAmI.describe()) }
 }
 
-/** While navigating: instruction, distance, direction; Repeat, What's in this direction, More details, Stop. */
+/** While navigating: next action, distance left, guidance kind; Repeat, What's in this direction, More details, Stop. */
 class NavigationScreen : Screen() {
     private var instruction: TextView? = null
     private var distance: TextView? = null
-    private var direction: TextView? = null
+    private var guidance: TextView? = null
     private var islandLine: TextView? = null
     private var wasActive = false
 
@@ -71,14 +79,32 @@ class NavigationScreen : Screen() {
         wasActive = t != null
         if (t == null) {
             titleView = ui.title(nav.lastArrivalText.ifBlank { "Navigation stopped" })
-            instruction = null; distance = null; direction = null; islandLine = null
+            instruction = null; distance = null; guidance = null; islandLine = null
+            val last = nav.lastArrived
+            if (last != null && last.kind == mv.haluvi.navigation.nav.NavKind.PLACE &&
+                (last.placeId == null || g.store.byId(last.placeId) == null) && g.store.findDuplicate(last.name, last.lat, last.lon) == null) {
+                ui.button("Save ${last.name} to my places") {
+                    g.store.add(mv.haluvi.navigation.data.SavedLocation(mv.haluvi.navigation.data.SavedLocation.newId(), last.name, last.lat, last.lon))
+                    host.speak("Saved."); rebuild()
+                }
+            }
+            val start = nav.lastStart
+            if (last != null && start != null) {
+                ui.button("Go back to start") {
+                    val kind = last.kind
+                    val back = if (kind == mv.haluvi.navigation.nav.NavKind.ISLAND) {
+                        g.islands.nearest(start.lat, start.lon)?.island?.let { Destination.of(it) }
+                    } else Destination("your starting point", start.lat, start.lon, mv.haluvi.navigation.nav.NavKind.PLACE)
+                    if (back != null) { nav.start(back); rebuild() }
+                }
+            }
             ui.button("Home") { host.showHome() }
             return scroll
         }
         titleView = ui.title("Going to ${t.name}")
-        instruction = ui.info(nav.instructionText)
-        distance = ui.info(nav.distanceText)
-        direction = ui.info(nav.directionText)
+        instruction = ui.info(nav.instructionText.ifBlank { "Starting." })
+        distance = ui.info(nav.distanceText.ifBlank { "Waiting for GPS." })
+        guidance = ui.info(nav.guidanceText)
         islandLine = if (t.kind == mv.haluvi.navigation.nav.NavKind.ISLAND) ui.info(g.islandWatcher.lastMessage.ifBlank { "Island stops will be announced." }) else null
         ui.row(
             "Repeat" to { host.speak(nav.repeatText()) },
@@ -93,8 +119,8 @@ class NavigationScreen : Screen() {
         val nav = AppGraph.nav
         if (nav.isActive != wasActive) { rebuild(); return }
         instruction?.text = nav.instructionText.ifBlank { "Starting." }
-        distance?.text = nav.distanceText.ifBlank { "Distance: waiting for GPS." }
-        direction?.text = nav.directionText.ifBlank { " " }
+        distance?.text = nav.distanceText.ifBlank { "Waiting for GPS." }
+        guidance?.text = nav.guidanceText
         islandLine?.text = AppGraph.islandWatcher.lastMessage.ifBlank { "Island stops will be announced." }
     }
 }
@@ -117,7 +143,7 @@ class DetailsScreen : Screen() {
 
     private fun lines(): List<String> {
         val nav = AppGraph.nav
-        return listOf(nav.speedText, nav.altitudeText, nav.gpsText, nav.routeMessage).map { it.ifBlank { " " } }
+        return listOf(nav.directionText, nav.speedText, nav.altitudeText, nav.gpsText, nav.routeMessage).map { it.ifBlank { " " } }
     }
 
     override fun onLive() { lines().forEachIndexed { i, s -> views.getOrNull(i)?.text = s } }

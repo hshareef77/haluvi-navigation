@@ -53,6 +53,36 @@ class RoadNames(private val file: File) {
         }
     }
 
+    /** For the backup file. */
+    @Synchronized
+    fun exportJson(): JSONArray {
+        val arr = JSONArray()
+        items.forEach { n ->
+            val pts = JSONArray(); n.points.forEach { p -> pts.put(JSONArray().put(p[0]).put(p[1])) }
+            arr.put(JSONObject().put("island", n.islandKey).put("name", n.name).put("points", pts))
+        }
+        return arr
+    }
+
+    /** From a backup file: each name is added (replacing a name on the same road). Returns how many. */
+    @Synchronized
+    fun importJson(arr: JSONArray): Int {
+        var n = 0
+        for (i in 0 until arr.length()) runCatching {
+            val o = arr.getJSONObject(i)
+            val pts = o.getJSONArray("points")
+            val points = (0 until pts.length()).map { j -> val p = pts.getJSONArray(j); doubleArrayOf(p.getDouble(0), p.getDouble(1)) }
+            if (points.size >= 2) {
+                val island = o.getString("island")
+                items.removeAll { it.islandKey == island && matches(points, it.points) && matches(it.points, points) }
+                items.add(NamedRoad(java.util.UUID.randomUUID().toString(), island, o.getString("name"), points, System.currentTimeMillis()))
+                n++
+            }
+        }
+        if (n > 0) save()
+        return n
+    }
+
     private fun load() {
         items.clear()
         if (!file.exists()) return
