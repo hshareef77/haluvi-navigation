@@ -18,7 +18,11 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
   - Online with a Google key: Google routes first; the offline route is used when offline or when Google fails.
   - Without either: clock-position guidance ("2 o'clock, 300 meters").
   - The phone vibrates while it points at the destination.
+  - Destination side decided about 60 m before the end (route side, else road direction, else walking
+    direction) and kept: "In 30 meters, destination on your right", "Arrived at …, destination on your right".
 - **Explore**: your road, intersections on your road, and places as you pass them. Pauses when GPS is weak.
+- **Name this road**: walk 30 m along an unnamed downloaded road (away from junctions) and give it a name.
+  Your names are used in Explore and offline routes, and are kept when the offline map is updated.
 - **What's around me**: nearest places with clock positions, by category.
 - **My places**: save, edit, delete, download island map (places and roads), import, export.
 - **Get Google places** (optional): all places Google Maps has on an island, of every kind. The island is

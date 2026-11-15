@@ -111,6 +111,10 @@ class NavigationEngine(
     private var minDist = Double.MAX_VALUE
     private var passedAnnounced = false
     private val approachSpoken = HashSet<Int>()
+    /** Side of the destination, decided once near the end and kept ("left", "right" or "ahead"). */
+    private var lockedSide: String? = null
+    /** How sure the locked side is: 3 route (Google or offline), 2 road direction, 1 walking direction. */
+    private var lockedRank = 0
 
     private val fixListener: (Fix) -> Unit = { f ->
         compass.updateDeclination(f.lat, f.lon, f.altitude)
@@ -198,7 +202,7 @@ class NavigationEngine(
         distHistory.clear(); arrivalCount = 0
         lastDistSpoken = -1; lastDistSpeakMs = 0; lastGpsWaitSpeakMs = 0
         smoothedSpeed = null; lastSpeedDist = null; lastSpeedMs = 0; lastDistance = null
-        minDist = Double.MAX_VALUE; passedAnnounced = false; approachSpoken.clear()
+        minDist = Double.MAX_VALUE; passedAnnounced = false; approachSpoken.clear(); lockedSide = null; lockedRank = 0
         pointing = false; pointStatus = ""
         haptics.stopFocus()
     }
@@ -243,6 +247,7 @@ class NavigationEngine(
         // because a saved position is often the middle of a building.
         val effDist = if (t.kind == NavKind.PLACE) min(dist, roadPointDistance(f) ?: dist) else dist
 
+        updateLockedSide(f, t, effDist, route)
         if (confirmArrival(effDist, f, speed)) { arrive(t, f); return }
 
         directionText = "Destination ${Phrases.where(heading, bearing)}."
@@ -264,7 +269,8 @@ class NavigationEngine(
         notifyChanged()
     }
 
-    private fun isMoving(f: Fix) = f.bearing != null && (f.speedMps ?: 0.0) >= 1.0
+    /** Moving, including slow walking (0.5 m per second and more). */
+    private fun isMoving(f: Fix) = f.bearing != null && (f.speedMps ?: 0.0) >= 0.5
 
     /** Travel direction from GPS movement when moving (reliable in a car or pocket); phone compass when standing. */
     private fun travelHeading(f: Fix): Double = if (isMoving(f)) f.bearing!! else compass.heading
@@ -273,13 +279,53 @@ class NavigationEngine(
 
     private fun roadPointDistance(f: Fix): Double? = route?.steps?.lastOrNull()?.end?.let { Geo.distance(f.lat, f.lon, it.lat, it.lon) }
 
-    /** "on your right" etc.: Google's side on the last step when available, otherwise from the movement direction. */
-    private fun destinationSide(bearing: Double, heading: Double, moving: Boolean, r: Route?): String? {
-        val g = r?.steps?.lastOrNull { it.destinationSide.isNotBlank() }?.destinationSide
-        if (g != null && r != null && r.steps.size - 1 <= stepIndex) return "on your $g"
-        if (!moving) return null
-        val side = Geo.relativeSide(heading, bearing)
-        return if (side == "behind") null else side
+    /**
+     * Works out which side the destination is on, best source first:
+     *  3) the route's own side (Google's "Destination will be on the right", or the offline route's side);
+     *  2) the direction of the downloaded road you are on (stable even when walking slowly or standing);
+     *  1) your walking or driving direction.
+     * Returns "left", "right", "ahead" or null, with its rank.
+     */
+    private fun sideNow(f: Fix, t: Destination, r: Route?): Pair<String, Int>? {
+        r?.steps?.lastOrNull { it.destinationSide.isNotBlank() }?.destinationSide?.let { return it to 3 }
+        val bearing = Geo.bearing(f.lat, f.lon, t.lat, t.lon)
+        val d = Geo.distance(f.lat, f.lon, t.lat, t.lon)
+        if (d < 4) return null // too close for a direction from GPS
+        val moving = isMoving(f)
+        RoadDetector.roadDirectionAt(f)?.let { roadB ->
+            // The road runs both ways: use the way you are moving, or else the way towards the destination.
+            val ref = if (moving) f.bearing!! else bearing
+            val dirB = if (Geo.angleBetween(ref, roadB) <= 90) roadB else Geo.normalize(roadB + 180)
+            return sideWord(dirB, bearing) to 2
+        }
+        if (moving) return sideWord(f.bearing!!, bearing) to 1
+        return null
+    }
+
+    private fun sideWord(heading: Double, bearing: Double): String {
+        val diff = Geo.headingDifference(heading, bearing) // positive = target to the left
+        val a = abs(diff)
+        return when { a <= 25 -> "ahead"; a >= 155 -> "behind"; diff > 0 -> "left"; else -> "right" }
+    }
+
+    /** Decides the side near the end (60 m walking, 200 m driving) and keeps it, so it does not change at the last moment. */
+    private fun updateLockedSide(f: Fix, t: Destination, d: Double, r: Route?) {
+        if (t.kind != NavKind.PLACE) return
+        val zone = if (driving(f.speedMps)) 200.0 else 60.0
+        if (d > zone) return
+        val s = sideNow(f, t, r) ?: return
+        if (s.first == "behind") return
+        if (s.second > lockedRank || (s.second == lockedRank && lockedRank < 3 && d > 15)) { lockedSide = s.first; lockedRank = s.second }
+    }
+
+    /** "destination on your right", "destination straight ahead", or a clock position when the side is not known. */
+    private fun sidePhrase(f: Fix, t: Destination): String {
+        val side = lockedSide ?: sideNow(f, t, route)?.first?.takeIf { it != "behind" }
+        return when (side) {
+            "left", "right" -> "destination on your $side"
+            "ahead" -> "destination straight ahead"
+            else -> "destination ${Phrases.where(travelHeading(f), Geo.bearing(f.lat, f.lon, t.lat, t.lon))}"
+        }
     }
 
     /** Short, frequent messages near the end: "In 50 meters, destination on your right." */
@@ -288,9 +334,7 @@ class NavigationEngine(
         val hit = thresholds.filter { d <= it }.minOrNull() ?: return
         if (!approachSpoken.add(hit)) return
         thresholds.filter { it > hit }.forEach { approachSpoken.add(it) } // never say a farther one later
-        val side = destinationSide(bearing, heading, moving, r)
-        val where = side?.let { "destination $it" } ?: "destination ${Phrases.where(heading, bearing)}"
-        speaker.speak("In ${Phrases.distance(d)}, $where.")
+        speaker.speak("In ${Phrases.distance(d)}, ${sidePhrase(f, t)}.")
         lastDistSpeakMs = now; lastDistSpoken = d.roundToInt()
     }
 
@@ -304,7 +348,7 @@ class NavigationEngine(
         val goingAway = d >= minDist + (if (drive) 25.0 else 12.0)
         if (nearEnough && goingAway && Geo.relativeSide(heading, bearing) == "behind") {
             passedAnnounced = true
-            approachSpoken.clear()
+            approachSpoken.clear(); lockedSide = null; lockedRank = 0
             speaker.speak("You passed ${t.name}. It is ${Phrases.distance(d)} behind you. Turn around when safe.")
             if (route != null) location.fix?.let { maybeRequestRoute(it, force = true) }
         }
@@ -387,15 +431,19 @@ class NavigationEngine(
     fun arrivedAtIsland() { target?.takeIf { it.kind == NavKind.ISLAND }?.let { arrive(it, null) } }
 
     private fun arrive(t: Destination, f: Fix?) {
-        var side: String? = null
-        if (t.kind == NavKind.PLACE && f != null) {
-            val b = Geo.bearing(f.lat, f.lon, t.lat, t.lon)
-            side = destinationSide(b, travelHeading(f), isMoving(f), route)
-        }
         val text = when {
             t.kind == NavKind.ISLAND -> "Arrived at your destination, ${t.name}."
-            side != null -> "Arrived at ${t.name}, $side."
-            else -> "Arrived at ${t.name}."
+            f == null -> "Arrived at ${t.name}."
+            else -> {
+                val side = lockedSide ?: sideNow(f, t, route)?.first?.takeIf { it != "behind" }
+                when {
+                    side == "left" || side == "right" -> "Arrived at ${t.name}, destination on your $side."
+                    side == "ahead" -> "Arrived at ${t.name}, straight ahead."
+                    Geo.distance(f.lat, f.lon, t.lat, t.lon) >= 4 ->
+                        "Arrived at ${t.name}, ${Phrases.where(travelHeading(f), Geo.bearing(f.lat, f.lon, t.lat, t.lon))}."
+                    else -> "Arrived at ${t.name}."
+                }
+            }
         }
         clearActiveState()
         lastArrivalText = text
@@ -562,8 +610,8 @@ class NavigationEngine(
         val current = r.steps.getOrNull(stepIndex)
         val d = stepRemaining?.roundToInt()
         val driving = settings.travelMode == TravelMode.DRIVING
-        val gSide = r.steps.lastOrNull { it.destinationSide.isNotBlank() }?.destinationSide
-        val arriveText = if (gSide != null) "destination on your $gSide" else "arrive at destination"
+        val gSide = lockedSide ?: r.steps.lastOrNull { it.destinationSide.isNotBlank() }?.destinationSide
+        val arriveText = when (gSide) { "left", "right" -> "destination on your $gSide"; "ahead" -> "destination straight ahead"; else -> "arrive at destination" }
         val nowDist = if (driving) 25 else 8
         instructionText = if (following != null) {
             val man = maneuverText(following)

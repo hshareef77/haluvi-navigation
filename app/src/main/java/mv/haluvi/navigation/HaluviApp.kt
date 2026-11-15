@@ -59,6 +59,7 @@ object AppGraph {
         explore = ExploreEngine(app, settings, islands, store, location, speaker, google, nav)
         islandWatcher = IslandWatcher(app, settings, shapes, location, speaker, haptics, nav) { explore.active }
         explore.atSea = { f -> islandWatcher.atSea(f) }
+        location.addListener { f -> mv.haluvi.navigation.nav.RoadDetector.onFix(f) }
         compass.onCalibrationNeeded = {
             if (nav.isActive || explore.active) speaker.speak("Compass needs calibration. Move the phone in a figure eight.", flush = false)
         }

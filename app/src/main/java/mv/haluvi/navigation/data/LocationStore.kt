@@ -103,7 +103,7 @@ data class SavedLocation(
 data class PlaceHit(val loc: SavedLocation, val distance: Double, val bearing: Double)
 
 /** A road or path from the map. [kind] is the OpenStreetMap highway type (residential, footway, ...). */
-data class DownloadedRoad(val name: String, val points: List<DoubleArray>, val kind: String = "", val oneway: Boolean = false)
+data class DownloadedRoad(val name: String, val points: List<DoubleArray>, val kind: String = "", val oneway: Boolean = false, val userNamed: Boolean = false)
 
 /**
  * Saved places (manual extra locations, downloaded OpenStreetMap places, saved online results)
@@ -113,6 +113,8 @@ data class DownloadedRoad(val name: String, val points: List<DoubleArray>, val k
 class LocationStore(private val context: Context, private val islands: IslandRepository) {
     private val file = File(context.filesDir, "locations.json")
     private val roadsDir = File(context.filesDir, "roads").apply { mkdirs() }
+    /** The user's own road names, put on top of the downloaded roads whenever they are loaded. */
+    val roadNames = RoadNames(File(context.filesDir, "road_names.json"))
     private val _items = ArrayList<SavedLocation>()
     val items: List<SavedLocation> get() = _items
 
@@ -227,7 +229,7 @@ class LocationStore(private val context: Context, private val islands: IslandRep
                     val p = pts.getJSONArray(j); doubleArrayOf(p.getDouble(0), p.getDouble(1))
                 }, o.optString("kind"), o.optBoolean("oneway"))
             }
-        }.getOrDefault(emptyList())
+        }.getOrDefault(emptyList()).let { roadNames.apply(islandKey, it) }
     }
 
     fun roadCount(islandKey: String): Int = loadRoads(islandKey).size

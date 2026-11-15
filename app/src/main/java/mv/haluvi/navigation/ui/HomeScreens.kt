@@ -146,6 +146,7 @@ class ExploreScreen : Screen() {
         }
         if (!ex.hasMapRoads && ex.active) ui.info("For intersections, download the island map in My places.")
         ui.button("What's around me") { host.show { AroundMeScreen() } }
+        ui.button("Name this road") { host.show { RoadNameScreen() } }
         ui.button("Back") { host.back() }
         return scroll
     }

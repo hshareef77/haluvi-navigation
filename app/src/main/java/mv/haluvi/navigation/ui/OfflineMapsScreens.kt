@@ -98,6 +98,8 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
         ui.button("Get Google places") { host.show { GooglePlacesScreen() } }
         ui.button("Share offline maps report") { shareText(host, "Haluvi offline maps report", OfflineMaps.report()) }
         ui.button("Island outlines details") { host.show { IslandOutlinesScreen() } }
+        ui.button("Name this road") { host.show { RoadNameScreen() } }
+        ui.button("My road names: ${AppGraph.store.roadNames.all().size}") { host.show { MyRoadNamesScreen() } }
         ui.info("Map data © OpenStreetMap contributors.")
         ui.button("Back") { host.back() }
         return scroll

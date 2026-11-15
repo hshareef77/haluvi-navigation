@@ -202,10 +202,12 @@ class ExploreEngine(
 
     // ---------------- roads ----------------
 
+    private var roadsVersion = -1
+
     private fun loadRoadsFor(f: Fix) {
         val key = islands.nearest(f.lat, f.lon)?.island?.key ?: return
-        if (key == roadsIslandKey) return
-        roadsIslandKey = key
+        if (key == roadsIslandKey && roadsVersion == RoadDetector.version) return
+        roadsIslandKey = key; roadsVersion = RoadDetector.version
         roads = store.loadRoads(key)
         hasMapRoads = roads.isNotEmpty()
         currentRoadIndex = -1
