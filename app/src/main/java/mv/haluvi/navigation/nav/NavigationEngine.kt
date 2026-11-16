@@ -35,9 +35,12 @@ import kotlin.math.roundToInt
 enum class NavKind { PLACE, ISLAND }
 
 /** A destination: a place (saved or found online) or an island. */
-data class Destination(val name: String, val lat: Double, val lon: Double, val kind: NavKind, val placeId: String? = null, val islandKey: String? = null) {
+data class Destination(val name: String, val lat: Double, val lon: Double, val kind: NavKind, val placeId: String? = null, val islandKey: String? = null,
+                       /** The point on the road in front of the place, when it was saved with its side. */
+                       val access: mv.haluvi.navigation.core.LatLon? = null) {
     companion object {
-        fun of(loc: SavedLocation) = Destination(loc.name, loc.lat, loc.lon, NavKind.PLACE, placeId = loc.id)
+        fun of(loc: SavedLocation) = Destination(loc.name, loc.lat, loc.lon, NavKind.PLACE, placeId = loc.id,
+            access = if (loc.hasAccess) mv.haluvi.navigation.core.LatLon(loc.accessLat, loc.accessLon) else null)
         fun of(island: Island) = Destination(island.fullName, island.lat, island.lon, NavKind.ISLAND, islandKey = island.key)
     }
 }
@@ -218,6 +221,7 @@ class NavigationEngine(
         lastDistSpoken = -1; lastDistSpeakMs = 0; lastGpsWaitSpeakMs = 0
         smoothedSpeed = null; lastSpeedDist = null; lastSpeedMs = 0; lastDistance = null
         minDist = Double.MAX_VALUE; passedAnnounced = false; approachSpoken.clear(); lockedSide = null; lockedRank = 0
+        awayMin = Double.MAX_VALUE; awayLastMs = 0
         pointing = false; pointStatus = ""
         haptics.stopFocus()
     }
@@ -260,7 +264,8 @@ class NavigationEngine(
         val heading = travelHeading(f)
         // For places, also measure to where the place meets the road (end of the Google route),
         // because a saved position is often the middle of a building.
-        val effDist = if (t.kind == NavKind.PLACE) min(dist, roadPointDistance(f) ?: dist) else dist
+        val accessDist = t.access?.let { Geo.distance(f.lat, f.lon, it.lat, it.lon) }
+        val effDist = if (t.kind == NavKind.PLACE) minOf(dist, accessDist ?: roadPointDistance(f) ?: dist) else dist
 
         updateLockedSide(f, t, effDist, route)
         if (confirmArrival(effDist, f, speed)) { arrive(t, f); return }
@@ -280,6 +285,7 @@ class NavigationEngine(
             val onLastStep = r == null || stepIndex >= r.steps.size - 1
             if (onLastStep) finalApproach(t, f, effDist, bearing, heading, moving, r)
             checkPassed(t, f, effDist, bearing, heading, moving)
+            checkMovingAway(t, f, effDist, bearing, heading, moving)
         }
         notifyChanged()
     }
@@ -311,16 +317,23 @@ class NavigationEngine(
             // The road runs both ways: use the way you are moving, or else the way towards the destination.
             val ref = if (moving) f.bearing!! else bearing
             val dirB = if (Geo.angleBetween(ref, roadB) <= 90) roadB else Geo.normalize(roadB + 180)
-            return sideWord(dirB, bearing) to 2
+            return sideWord(dirB, bearing, d) to 2
         }
-        if (moving) return sideWord(f.bearing!!, bearing) to 1
+        if (moving) return sideWord(f.bearing!!, bearing, d) to 1
         return null
     }
 
-    private fun sideWord(heading: Double, bearing: Double): String {
+    /**
+     * Which side of the road line the destination is on. Measured as metres to the left or right of the line
+     * you travel along (not as an angle), so a shop 10 m beside the road is "on your right" also from 60 m away.
+     * "ahead" only when it is within 3 m of the line (for example at the end of the road).
+     */
+    private fun sideWord(heading: Double, bearing: Double, d: Double): String {
         val diff = Geo.headingDifference(heading, bearing) // positive = target to the left
-        val a = abs(diff)
-        return when { a <= 25 -> "ahead"; a >= 155 -> "behind"; diff > 0 -> "left"; else -> "right" }
+        val r = Math.toRadians(diff)
+        val along = d * kotlin.math.cos(r)
+        val lateral = d * kotlin.math.abs(kotlin.math.sin(r))
+        return when { along < -5 -> "behind"; lateral < 3 -> "ahead"; diff > 0 -> "left"; else -> "right" }
     }
 
     /** Decides the side near the end (60 m walking, 200 m driving) and keeps it, so it does not change at the last moment. */
@@ -369,6 +382,31 @@ class NavigationEngine(
             mv.haluvi.navigation.feedback.TripAlerts.alert(context, passedText)
             if (route != null) location.fix?.let { maybeRequestRoute(it, force = true) }
         }
+    }
+
+    private var awayMin = Double.MAX_VALUE
+    private var awayLastMs = 0L
+
+    /** Without a route: warns when the distance keeps growing ("You are moving away"), with the direction to turn to. */
+    private fun checkMovingAway(t: Destination, f: Fix, d: Double, bearing: Double, heading: Double, moving: Boolean) {
+        if (route != null || !moving) return
+        if (d < awayMin) awayMin = d
+        val drive = driving(f.speedMps)
+        if (minDist <= (if (drive) 80.0 else 35.0)) return // near the place: "You passed" handles it
+        val step = if (drive) 80.0 else 25.0
+        if (d >= awayMin + step && now - awayLastMs > 60_000) {
+            awayLastMs = now; awayMin = d
+            speaker.speak("You are moving away from ${t.name}. Destination ${Phrases.where(heading, bearing)}, ${Phrases.distance(d)}.")
+        }
+    }
+
+    /** "Where is it?": direction from the way the phone points, and distance. */
+    fun whereIsItText(): String {
+        val t = target ?: return "No navigation."
+        val f = location.fix ?: return "Waiting for GPS."
+        val b = Geo.bearing(f.lat, f.lon, t.lat, t.lon)
+        val d = Geo.distance(f.lat, f.lon, t.lat, t.lon)
+        return "${t.name}: ${Phrases.where(compass.heading, b).removePrefix("at ")}, ${Phrases.distance(d)}. Point the phone; it vibrates when it points at it."
     }
 
     private fun directDistanceSpeech(t: Destination, dist: Double, bearing: Double, heading: Double) {

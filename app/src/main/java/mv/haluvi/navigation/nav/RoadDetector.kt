@@ -59,6 +59,26 @@ object RoadDetector {
         return best
     }
 
+    /** "Check this road": which road you are on, and whether it is on the map, named by you or recorded by you. */
+    fun describeHere(): String {
+        val f = AppGraph.location.fix ?: return "Waiting for GPS."
+        if (f.ageMs > 15_000) return "Waiting for GPS."
+        val (_, rs) = roadsAt(f.lat, f.lon) ?: return "Not near an island."
+        if (rs.isEmpty()) return "No roads downloaded for this island. Download it in Offline maps, or record the road."
+        val n = nearest(f.lat, f.lon, rs)
+        val weak = if (f.accuracy > 20) " GPS is weak, about ${Phrases.distance(f.accuracy)}." else ""
+        if (n == null || n.dist > NEAR_ROAD_M) return "No road here on the map. You can record it.$weak"
+        val r = rs[n.road]
+        val other = nearest(f.lat, f.lon, rs, setOf(n.road))
+        val near = if (other != null && other.dist <= NEAR_ROAD_M) " Another road is close, so this may be a junction." else ""
+        return when {
+            r.recorded -> "You are on your recorded road${if (r.name.isNotBlank()) ": ${r.name}" else ""}."
+            r.userNamed -> "You are on ${r.name}, your name for this map road."
+            r.name.isNotBlank() -> "You are on ${r.name}, from the map."
+            else -> "You are on an unnamed map road. You can name it."
+        } + near + weak
+    }
+
     /** Name of the downloaded road you are on (your own name or the map's), within 15 m; null if unnamed or none. */
     fun roadNameAt(lat: Double, lon: Double): String? {
         val (_, rs) = roadsAt(lat, lon) ?: return null

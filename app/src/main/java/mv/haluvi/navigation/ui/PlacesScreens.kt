@@ -143,6 +143,8 @@ private fun categoryChooser(host: MainActivity, current: String, set: (String) -
 class SavePlaceScreen : Screen() {
     private var name = ""
     private var category = "none"
+    /** "here", "left" or "right": where the place is, seen from where you stand on the road. */
+    private var side = "here"
     override fun create(): View {
         val g = AppGraph
         val (scroll, ui) = UiBuilder.scrolling(host)
@@ -151,6 +153,12 @@ class SavePlaceScreen : Screen() {
         ui.info(if (f == null) "Waiting for GPS." else if (f.accuracy > 30) "GPS is weak. Wait a little if you can." else "GPS is good.")
         val edit = ui.edit("Name", name)
         ui.button("Category: ${Categories.name(category)}") { name = edit.text.toString(); host.show(categoryChooser(host, category) { category = it }) }
+        ui.button("Where is the place: " + when (side) { "left" -> "on my left"; "right" -> "on my right"; else -> "here" }) {
+            name = edit.text.toString()
+            side = when (side) { "here" -> "left"; "left" -> "right"; else -> "here" }
+            host.say(when (side) { "left" -> "On my left"; "right" -> "On my right"; else -> "Here" }); rebuild()
+        }
+        if (side != "here") ui.info("Stand on the road in front of the place, facing along the road. Arrival will then say the correct side.")
         ui.button("Save", color = UiColors.BUTTON_ON) {
             val n = edit.text.toString().trim()
             val fix = g.location.freshFix(15_000)
@@ -162,7 +170,17 @@ class SavePlaceScreen : Screen() {
                     val dup = g.store.findDuplicate(n, fix.lat, fix.lon)
                     if (dup != null) host.speak("${dup.name} is already saved here.")
                     else {
-                        g.store.add(SavedLocation(SavedLocation.newId(), n, fix.lat, fix.lon, fix.accuracy, source = SavedLocation.SOURCE_MANUAL, categoryId = category))
+                        val loc = SavedLocation(SavedLocation.newId(), n, fix.lat, fix.lon, fix.accuracy, source = SavedLocation.SOURCE_MANUAL, categoryId = category)
+                        if (side != "here") {
+                            // Facing direction: the road direction nearest to where the phone points, else the walking or phone direction.
+                            val phone = if ((fix.speedMps ?: 0.0) >= 0.5 && fix.bearing != null) fix.bearing else g.compass.heading
+                            val facing = mv.haluvi.navigation.nav.RoadDetector.roadDirectionAt(fix)?.let { rb ->
+                                if (Geo.angleBetween(phone, rb) <= 90) rb else Geo.normalize(rb + 180)
+                            } ?: phone
+                            val p = mv.haluvi.navigation.core.offsetPoint(fix.lat, fix.lon, Geo.normalize(facing + if (side == "left") -90.0 else 90.0), 8.0)
+                            loc.lat = p.lat; loc.lon = p.lon; loc.accessLat = fix.lat; loc.accessLon = fix.lon
+                        }
+                        g.store.add(loc)
                         host.speak("$n saved.")
                         host.back()
                     }

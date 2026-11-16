@@ -62,8 +62,12 @@ data class SavedLocation(
     var islandName: String = "",
     var address: String = "",
     /** Google place ID for places saved from Google (their position is refreshed every few weeks). */
-    var placeId: String = ""
+    var placeId: String = "",
+    /** Where you stood on the road in front of the place (saved with "on my left / right"); 0 when not known. */
+    var accessLat: Double = 0.0,
+    var accessLon: Double = 0.0
 ) {
+    val hasAccess: Boolean get() = accessLat != 0.0 || accessLon != 0.0
     val isDownloadedMapPlace: Boolean get() = source == SOURCE_OSM_MAP
     val categoryName: String get() = Categories.name(categoryId)
 
@@ -71,7 +75,7 @@ data class SavedLocation(
         .put("id", id).put("name", name).put("lat", lat).put("lon", lon)
         .put("accuracy", accuracy).put("savedTime", savedTime).put("source", source)
         .put("categoryId", categoryId).put("islandKey", islandKey).put("islandName", islandName)
-        .put("address", address).put("placeId", placeId)
+        .put("address", address).put("placeId", placeId).put("accessLat", accessLat).put("accessLon", accessLon)
 
     companion object {
         const val SOURCE_MANUAL = "manual"
@@ -94,7 +98,9 @@ data class SavedLocation(
                 islandKey = o.optString("islandKey", ""),
                 islandName = o.optString("islandName", ""),
                 address = o.optString("address", ""),
-                placeId = o.optString("placeId", "")
+                placeId = o.optString("placeId", ""),
+                accessLat = o.optDouble("accessLat", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+                accessLon = o.optDouble("accessLon", 0.0).takeIf { !it.isNaN() } ?: 0.0
             ).takeIf { !it.lat.isNaN() && !it.lon.isNaN() }
         }
     }
@@ -103,7 +109,9 @@ data class SavedLocation(
 data class PlaceHit(val loc: SavedLocation, val distance: Double, val bearing: Double)
 
 /** A road or path from the map. [kind] is the OpenStreetMap highway type (residential, footway, ...). */
-data class DownloadedRoad(val name: String, val points: List<DoubleArray>, val kind: String = "", val oneway: Boolean = false, val userNamed: Boolean = false)
+data class DownloadedRoad(val name: String, val points: List<DoubleArray>, val kind: String = "", val oneway: Boolean = false, val userNamed: Boolean = false,
+                         /** A road the user recorded by walking (not on the downloaded map). */
+                         val recorded: Boolean = false)
 
 /**
  * Saved places (manual extra locations, downloaded OpenStreetMap places, saved online results)

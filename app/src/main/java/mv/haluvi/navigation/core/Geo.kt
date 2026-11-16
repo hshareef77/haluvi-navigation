@@ -132,6 +132,14 @@ object Geo {
 
 data class LatLon(val lat: Double, val lon: Double)
 
+/** The point [meters] away from (lat, lon) in direction [bearing] (fine for short distances). */
+fun offsetPoint(lat: Double, lon: Double, bearing: Double, meters: Double): LatLon {
+    val r = Math.toRadians(bearing)
+    val dLat = meters * Math.cos(r) / 111320.0
+    val dLon = meters * Math.sin(r) / (111320.0 * Math.cos(Math.toRadians(lat)))
+    return LatLon(lat + dLat, lon + dLon)
+}
+
 /** Spoken-friendly formatting. */
 object Fmt {
     fun meters(m: Double?): String {

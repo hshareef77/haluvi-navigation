@@ -108,8 +108,9 @@ class NavigationScreen : Screen() {
         islandLine = if (t.kind == mv.haluvi.navigation.nav.NavKind.ISLAND) ui.info(g.islandWatcher.lastMessage.ifBlank { "Island stops will be announced." }) else null
         ui.row(
             "Repeat" to { host.speak(nav.repeatText()) },
-            "What's in this direction" to { host.speak(Surroundings.inDirection()) }
+            "Where is it?" to { host.speak(nav.whereIsItText()) }
         )
+        ui.button("What's in this direction") { host.speak(Surroundings.inDirection()) }
         ui.button("More details") { host.show { DetailsScreen() } }
         ui.button("Stop navigation", color = UiColors.BUTTON_STOP) { nav.stop(); host.showHome() }
         return scroll
@@ -172,7 +173,7 @@ class ExploreScreen : Screen() {
         }
         if (!ex.hasMapRoads && ex.active) ui.info("For intersections, download the island map in My places.")
         ui.button("What's around me") { host.show { AroundMeScreen() } }
-        ui.button("Name this road") { host.show { RoadNameScreen() } }
+        ui.button("My roads") { host.show { MyRoadsScreen() } }
         ui.button("Back") { host.back() }
         return scroll
     }

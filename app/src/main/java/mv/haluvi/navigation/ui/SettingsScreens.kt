@@ -45,6 +45,7 @@ class SettingsScreen : Screen() {
         ui.button("Navigation") { host.show { NavigationSettingsScreen() } }
         ui.button("Google Maps") { host.show { GoogleSettingsScreen() } }
         ui.button("Offline maps") { host.show { OfflineMapsScreen() } }
+        ui.button("My roads: check, record, name and share") { host.show { MyRoadsScreen() } }
         ui.button("About") {
             host.show { TextScreen("About", listOf(
                 "Haluvi Navigation ${BuildConfig.VERSION_NAME}.",

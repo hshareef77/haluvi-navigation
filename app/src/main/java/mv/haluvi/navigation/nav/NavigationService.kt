@@ -38,7 +38,7 @@ class NavigationService : Service() {
 
         fun updateOrStop(context: Context) {
             val g = AppGraph
-            if (!g.nav.isActive && !g.explore.active && !g.settings.islandAlertsOn && !g.routeTrip.active && !g.routeRecorder.active) {
+            if (!g.nav.isActive && !g.explore.active && !g.settings.islandAlertsOn && !g.routeTrip.active && !g.routeRecorder.active && !RoadRecorder.active) {
                 if (running) context.stopService(Intent(context, NavigationService::class.java))
             }
         }
@@ -53,7 +53,7 @@ class NavigationService : Service() {
     private val fixListener: (mv.haluvi.navigation.sensors.Fix) -> Unit = { f ->
         val g = AppGraph
         val ms = when {
-            g.uiVisible || g.nav.isActive || g.explore.active || g.routeTrip.active || g.routeRecorder.active -> 1000L
+            g.uiVisible || g.nav.isActive || g.explore.active || g.routeTrip.active || g.routeRecorder.active || RoadRecorder.active -> 1000L
             g.islandWatcher.recentlyAtSea() || (f.speedMps ?: 0.0) >= 2.0 -> 2000L
             else -> 20_000L
         }
@@ -153,6 +153,7 @@ class NavigationService : Service() {
         return when {
             nav.isActive -> nav.notificationText().ifBlank { "Navigating" }
             AppGraph.routeTrip.active -> AppGraph.routeTrip.repeatText()
+            RoadRecorder.active -> "Recording a road: ${Phrases.distance(RoadRecorder.meters)} walked."
             AppGraph.routeRecorder.active -> "Recording route ${AppGraph.routeRecorder.name}. ${AppGraph.routeRecorder.status}"
             explore.active -> explore.statusText + (if (explore.roadText.isNotBlank()) " " + explore.roadText else "")
             AppGraph.settings.islandAlertsOn -> AppGraph.islandWatcher.lastMessage.ifBlank { "Watching for islands when you travel by sea." }

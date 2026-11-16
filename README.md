@@ -24,11 +24,16 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
   - Online with a Google key: Google routes first; the offline route is used when offline or when Google fails.
   - Without either: clock-position guidance ("2 o'clock, 300 meters").
   - The phone vibrates while it points at the destination.
-  - Destination side decided about 60 m before the end (route side, else road direction, else walking
-    direction) and kept: "In 30 meters, destination on your right", "Arrived at …, destination on your right".
+  - "Where is it?" gives the destination's clock position from where the phone points. Without a route,
+    "You are moving away" warns when the distance keeps growing.
+  - Destination side decided about 60 m before the end (route side, else metres left or right of the
+    road line you travel along, else walking direction) and kept: "In 30 meters, destination on your right", "Arrived at …, destination on your right".
 - **Explore**: your road, intersections on your road, and places as you pass them. Pauses when GPS is weak.
-- **Name this road**: walk 30 m along an unnamed downloaded road (away from junctions) and give it a name.
-  Your names are used in Explore and offline routes, and are kept when the offline map is updated.
+- **My roads**: Check this road (on the map, named by you, recorded by you, or missing), Name this road
+  (walk 30 m along it), Record a new road (walk along its middle; joined to roads at its ends and used in
+  offline routes), and Share with OpenStreetMap as a public note (no account; asks every time).
+  Your roads are kept when the offline map is updated, and are in the backup file.
+- **Save a place with its side** (here, on my left, on my right) for exact "destination on your left/right".
 - **What's around me**: nearest places with clock positions, by category.
 - **My places**: save, edit, delete, download island map (places and roads). One backup file (export and
   import) holds places, your road names and routes.
