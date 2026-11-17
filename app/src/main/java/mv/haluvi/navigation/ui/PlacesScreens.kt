@@ -22,9 +22,20 @@ import mv.haluvi.navigation.net.OnlinePlace
  * Saved and downloaded places, nearest first.
  * With [onPick] it is a chooser (tap = choose); without it, it manages places (tap = place options).
  */
+/** Which places to show: one island, one source (saved by me, offline map, Google) or one category. */
+data class PlaceFilter(val islandKey: String? = null, val source: String? = null, val category: String? = null, val label: String = "")
+
+fun sourceName(source: String): String = when (source) {
+    SavedLocation.SOURCE_MANUAL -> "Saved by me"
+    SavedLocation.SOURCE_OSM_MAP -> "Offline map"
+    SavedLocation.SOURCE_GOOGLE -> "Google"
+    else -> "Search results"
+}
+
 class MyPlacesScreen(
     private val title: String = "My places",
     private val firstChoice: Pair<String, () -> Unit>? = null,
+    private val filter: PlaceFilter? = null,
     private val onPick: ((SavedLocation) -> Unit)? = null
 ) : Screen() {
     private val forGoTo: Boolean get() = onPick != null
@@ -34,26 +45,36 @@ class MyPlacesScreen(
     override fun create(): View {
         val g = AppGraph
         val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title(title)
+        titleView = ui.title(if (filter != null) "$title: ${filter.label}" else title)
         firstChoice?.let { (label, action) -> ui.button(label) { action() } }
-        if (!forGoTo) ui.button("Add and manage") {
+        if (!forGoTo && filter == null) ui.button("Add and manage") {
             host.show {
                 ChoiceScreen("Add and manage", null, listOf(
                     "Save this place" to { host.show { SavePlaceScreen() } },
                     "Offline maps" to { host.show { OfflineMapsScreen() } },
                     "Get Google places" to { host.show { GooglePlacesScreen() } },
+                    "My roads" to { host.show { MyRoadsScreen() } },
                     "Import backup" to { host.back(); importPlaces() },
                     "Export backup: places, road names and routes" to { host.back(); exportPlaces() }
                 ))
             }
         }
+        if (filter == null) ui.button("Show: near me. Change") { chooseView() }
+        else filter.islandKey?.let { key -> g.islands.byKey(key) ?: g.shapes.extras.firstOrNull { it.key == key } }?.let { isl ->
+            if (!forGoTo) ui.button("Island details") { host.show { IslandDetailsScreen(isl) } }
+        }
         val edit = ui.edit("Find in my places", query) { query = it.trim(); limit = 40; rebuild() }
         ui.row("Find" to { query = edit.text.toString().trim(); limit = 40; rebuild() }, "Clear" to { query = ""; rebuild() })
 
+        // Nearest first (also when choosing where to go); by name only while there is no position at all.
         val f = g.location.fix
-        val rows: List<Triple<SavedLocation, Double?, Double?>> = if (f != null)
-            g.store.nearest(f.lat, f.lon, query).map { Triple(it.loc, it.distance, it.bearing) }
-        else g.store.filtered(query).map { Triple(it, null, null) }
+        val cat = filter?.category ?: "all"
+        val all: List<Triple<SavedLocation, Double?, Double?>> = if (f != null)
+            g.store.nearest(f.lat, f.lon, query, cat, filter?.islandKey).map { Triple(it.loc, it.distance, it.bearing) }
+        else g.store.filtered(query, cat).filter { filter?.islandKey == null || it.islandKey == filter.islandKey }.map { Triple(it, null, null) }
+        val rows = all.filter { filter?.source == null || it.first.source == filter.source }
+        if (f == null) ui.info("Waiting for GPS: sorted by name.")
+        ui.info("${rows.size} places.")
         if (rows.isEmpty()) ui.info(if (g.store.items.isEmpty()) "No places yet. Save this place, or download the island map." else "No places found.")
         rows.take(limit).forEach { (loc, d, b) ->
             val text = if (d != null && b != null) Phrases.place(loc.name, g.compass.heading, b, d) else loc.name
@@ -65,6 +86,28 @@ class MyPlacesScreen(
         if (rows.size > limit) ui.button("More places") { limit += 40; rebuild() }
         ui.button("Back") { host.back() }
         return scroll
+    }
+
+    /** Near me, by island, by source or by category. Keeps choosing mode ([onPick]) and the title. */
+    private fun chooseView() {
+        val g = AppGraph
+        fun open(fl: PlaceFilter) { host.show { MyPlacesScreen(title, null, fl, onPick) } }
+        host.show {
+            ChoiceScreen("Show places", null, listOf(
+                "Near me" to { host.back() },
+                "By island" to { host.show { AtollPickerScreen { isl ->
+                    host.backTo(this@MyPlacesScreen); open(PlaceFilter(islandKey = isl.key, label = isl.name))
+                } } },
+                "By source" to { host.show { ChoiceScreen("By source", null,
+                    listOf(SavedLocation.SOURCE_MANUAL, SavedLocation.SOURCE_OSM_MAP, SavedLocation.SOURCE_GOOGLE, SavedLocation.SOURCE_OSM_SEARCH).map { src ->
+                        "${sourceName(src)}: ${g.store.items.count { it.source == src }}" to { host.backTo(this@MyPlacesScreen); open(PlaceFilter(source = src, label = sourceName(src))) }
+                    }) } },
+                "By category" to { host.show { ChoiceScreen("By category", null,
+                    Categories.all.map { c ->
+                        "${c.name}: ${g.store.items.count { it.categoryId == c.id }}" to { host.backTo(this@MyPlacesScreen); open(PlaceFilter(category = c.id, label = c.name)) }
+                    }) } }
+            ))
+        }
     }
 
     private fun importPlaces() {
@@ -121,7 +164,9 @@ class PlaceScreen(private val id: String) : Screen() {
         if (f != null) parts.add(Phrases.distance(Geo.distance(f.lat, f.lon, loc.lat, loc.lon)) + ", " + Phrases.where(g.compass.heading, Geo.bearing(f.lat, f.lon, loc.lat, loc.lon)) + ".")
         if (loc.categoryId != "none") parts.add(loc.categoryName + ".")
         if (loc.islandName.isNotBlank()) parts.add(loc.islandName + ".")
-        if (parts.isNotEmpty()) ui.info(parts.joinToString(" "))
+        parts.add("Source: ${sourceName(loc.source)}.")
+        if (loc.hasAccess) parts.add("Saved with its side of the road.")
+        ui.info(parts.joinToString(" "))
         ui.button("Go there", color = UiColors.BUTTON_ON) { goToPlace(host, loc) }
         ui.button("Edit") { host.show { EditPlaceScreen(id) } }
         ui.button("Delete", color = UiColors.BUTTON_STOP) {
@@ -171,15 +216,7 @@ class SavePlaceScreen : Screen() {
                     if (dup != null) host.speak("${dup.name} is already saved here.")
                     else {
                         val loc = SavedLocation(SavedLocation.newId(), n, fix.lat, fix.lon, fix.accuracy, source = SavedLocation.SOURCE_MANUAL, categoryId = category)
-                        if (side != "here") {
-                            // Facing direction: the road direction nearest to where the phone points, else the walking or phone direction.
-                            val phone = if ((fix.speedMps ?: 0.0) >= 0.5 && fix.bearing != null) fix.bearing else g.compass.heading
-                            val facing = mv.haluvi.navigation.nav.RoadDetector.roadDirectionAt(fix)?.let { rb ->
-                                if (Geo.angleBetween(phone, rb) <= 90) rb else Geo.normalize(rb + 180)
-                            } ?: phone
-                            val p = mv.haluvi.navigation.core.offsetPoint(fix.lat, fix.lon, Geo.normalize(facing + if (side == "left") -90.0 else 90.0), 8.0)
-                            loc.lat = p.lat; loc.lon = p.lon; loc.accessLat = fix.lat; loc.accessLon = fix.lon
-                        }
+                        placeAtSide(loc, fix, side)
                         g.store.add(loc)
                         host.speak("$n saved.")
                         host.back()
@@ -192,10 +229,28 @@ class SavePlaceScreen : Screen() {
     }
 }
 
+/**
+ * Puts [loc] at your position, or (side "left"/"right") 8 m to that side of the road you stand on, keeping
+ * your position as the road point in front of it, so arrival says the right side from either direction.
+ */
+fun placeAtSide(loc: SavedLocation, fix: mv.haluvi.navigation.sensors.Fix, side: String) {
+    val g = AppGraph
+    loc.lat = fix.lat; loc.lon = fix.lon; loc.accessLat = 0.0; loc.accessLon = 0.0
+    if (side != "left" && side != "right") return
+    // Facing direction: the road direction nearest to where the phone points, else the walking or phone direction.
+    val phone = if ((fix.speedMps ?: 0.0) >= 0.5 && fix.bearing != null) fix.bearing else g.compass.heading
+    val facing = mv.haluvi.navigation.nav.RoadDetector.roadDirectionAt(fix)?.let { rb ->
+        if (Geo.angleBetween(phone, rb) <= 90) rb else Geo.normalize(rb + 180)
+    } ?: phone
+    val p = mv.haluvi.navigation.core.offsetPoint(fix.lat, fix.lon, Geo.normalize(facing + if (side == "left") -90.0 else 90.0), 8.0)
+    loc.lat = p.lat; loc.lon = p.lon; loc.accessLat = fix.lat; loc.accessLon = fix.lon
+}
+
 class EditPlaceScreen(private val id: String) : Screen() {
     private var name: String? = null
     private var category: String? = null
     private var moveHere = false
+    private var side = "here"
     override fun create(): View {
         val g = AppGraph
         val (scroll, ui) = UiBuilder.scrolling(host)
@@ -206,13 +261,18 @@ class EditPlaceScreen(private val id: String) : Screen() {
         val edit = ui.edit("Name", name ?: "")
         ui.button("Category: ${Categories.name(category)}") { name = edit.text.toString(); host.show(categoryChooser(host, category ?: "none") { category = it }) }
         ui.button("Move to my position: ${if (moveHere) "On" else "Off"}") { name = edit.text.toString(); moveHere = !moveHere; rebuild() }
+        if (moveHere) ui.button("Where is the place: " + when (side) { "left" -> "on my left"; "right" -> "on my right"; else -> "here" }) {
+            name = edit.text.toString()
+            side = when (side) { "here" -> "left"; "left" -> "right"; else -> "here" }
+            host.say(when (side) { "left" -> "On my left"; "right" -> "On my right"; else -> "Here" }); rebuild()
+        }
         ui.button("Save", color = UiColors.BUTTON_ON) {
             val n = edit.text.toString().trim()
             if (n.isEmpty()) { host.speak("Please type a name."); return@button }
             if (moveHere) {
                 val f = g.location.freshFix(15_000)
                 if (f == null || f.accuracy > 100) { host.speak("GPS is not ready. Please wait and try again."); return@button }
-                loc.lat = f.lat; loc.lon = f.lon; loc.accuracy = f.accuracy; loc.islandKey = ""
+                placeAtSide(loc, f, side); loc.accuracy = f.accuracy; loc.islandKey = ""
             }
             loc.name = n
             loc.categoryId = category ?: "none"
@@ -327,6 +387,13 @@ class AtollPickerScreen(private val onPick: (Island) -> Unit) : Screen() {
             val found = g.shapes.search(query).take(40)
             if (found.isEmpty()) ui.info("Nothing found.")
             found.forEach { isl -> ui.button(islandLabel(isl)) { onPick(isl) } }
+        }
+        if (query.isBlank()) g.location.fix?.let { f ->
+            // Nearest inhabited islands first (my island first).
+            ui.heading("Nearest islands")
+            g.islands.allIslands.sortedBy { Geo.distance(f.lat, f.lon, it.lat, it.lon) }.take(6)
+                .forEach { isl -> ui.button(islandLabel(isl)) { onPick(isl) } }
+            ui.heading("More")
         }
         ui.button("Airports") { host.show { AirportsScreen(onPick) } }
         if (g.shapes.extras.isNotEmpty()) ui.button("Resorts and other islands nearby") { host.show { OtherIslandsScreen(onPick) } }

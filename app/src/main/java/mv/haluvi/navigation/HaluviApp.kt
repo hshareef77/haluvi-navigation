@@ -50,6 +50,7 @@ object AppGraph {
         appContext = app
         settings = Settings(app)
         islands = IslandRepository(app)
+        mv.haluvi.navigation.data.IslandOverrides.init(app)
         shapes = IslandShapes(app, islands)
         store = LocationStore(app, islands)
         location = LocationTracker(app)

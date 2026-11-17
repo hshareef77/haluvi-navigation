@@ -194,6 +194,17 @@ class LocationStore(private val context: Context, private val islands: IslandRep
         return before - _items.size
     }
 
+    /** Deletes the places of one source (for example all Google places) on an island. Returns how many. */
+    @Synchronized
+    fun deleteForIsland(islandKey: String, source: String): Int {
+        val before = _items.size
+        _items.removeAll { it.islandKey == islandKey && it.source == source }
+        save()
+        return before - _items.size
+    }
+
+    fun countForIsland(islandKey: String, source: String? = null) = _items.count { it.islandKey == islandKey && (source == null || it.source == source) }
+
     fun countDownloadedForIsland(islandKey: String) = _items.count { it.isDownloadedMapPlace && it.islandKey == islandKey }
 
     fun nearest(lat: Double, lon: Double, query: String = "", category: String = "all", islandKey: String? = null): List<PlaceHit> {

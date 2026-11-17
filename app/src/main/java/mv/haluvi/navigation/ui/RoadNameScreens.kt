@@ -31,7 +31,6 @@ class RoadNameScreen : Screen() {
         edit = ui.edit("Road name")
         ui.button("Save", color = UiColors.BUTTON_ON) { save() }
         ui.button("Check again") { check(speakAlways = true) }
-        ui.button("My roads") { host.show { MyRoadsScreen() } }
         ui.button("Back") { host.back() }
         return scroll
     }

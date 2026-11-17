@@ -44,8 +44,14 @@ class SettingsScreen : Screen() {
         ui.button("Voice and vibration") { host.show { VoiceSettingsScreen() } }
         ui.button("Navigation") { host.show { NavigationSettingsScreen() } }
         ui.button("Google Maps") { host.show { GoogleSettingsScreen() } }
-        ui.button("Offline maps") { host.show { OfflineMapsScreen() } }
-        ui.button("My roads: check, record, name and share") { host.show { MyRoadsScreen() } }
+        ui.button("Maps, places and roads") {
+            host.show { ChoiceScreen("Maps, places and roads", "These are also in My places, Add and manage.", listOf(
+                "Offline maps" to { host.show { OfflineMapsScreen() } },
+                "Get Google places" to { host.show { GooglePlacesScreen() } },
+                "My roads" to { host.show { MyRoadsScreen() } },
+                "Manage islands" to { host.show { AtollPickerScreen { isl -> host.show { IslandDetailsScreen(isl) } } } }
+            )) }
+        }
         ui.button("About") {
             host.show { TextScreen("About", listOf(
                 "Haluvi Navigation ${BuildConfig.VERSION_NAME}.",
@@ -90,12 +96,7 @@ class NavigationSettingsScreen : Screen() {
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title("Navigation")
         ui.heading("Walking and driving")
-        ui.button("Travel mode: ${s.travelMode.label}") {
-            s.travelMode = if (s.travelMode == TravelMode.WALKING) TravelMode.DRIVING else TravelMode.WALKING
-            AppGraph.nav.refreshRoute()
-            host.say("Travel mode: ${s.travelMode.label}")
-            rebuild()
-        }
+        ui.info("Walking or driving is chosen on the Places screen (Travel).")
         ui.button(if (s.clockDirections) "Directions: clock. Example: 2 o'clock is ahead to the right. Tap for compass."
             else "Directions: compass. Example: north east, 45 degrees. Tap for clock.") {
             s.clockDirections = !s.clockDirections
@@ -107,7 +108,6 @@ class NavigationSettingsScreen : Screen() {
         ui.button("Arrival distance: ${Phrases.distance(s.arrivalDistance.toDouble())}") {
             host.show(Pickers.meters(host, "Arrival distance", listOf(5, 10, 15, 20, 30, 50), s.arrivalDistance) { s.arrivalDistance = it })
         }
-        ui.button("Pointing: vibration and accuracy") { host.show { PointingSettingsScreen() } }
         toggle(ui, "Miles too", { s.milesToo }) { s.milesToo = it }
 
         ui.heading("Islands and alerts")

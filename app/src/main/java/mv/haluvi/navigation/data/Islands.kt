@@ -8,7 +8,10 @@ data class Atoll(val index: Int, val name: String, val code: String, val fullNam
     val label: String get() = "$fullName ($code), $name"
 }
 
-data class Island(val atollIndex: Int, val index: Int, val name: String, var lat: Double, var lon: Double) {
+data class Island(val atollIndex: Int, val index: Int, var name: String, var lat: Double, var lon: Double) {
+    /** The app's own name (the user may rename the island; search finds both). */
+    val originalName: String = name
+
     /**
      * "inhabited" (only the official island list), "resort", "airport" or "island" (uninhabited).
      */
@@ -93,6 +96,6 @@ class IslandRepository(context: Context) {
     fun search(query: String): List<Island> {
         val q = query.trim().lowercase()
         if (q.isEmpty()) return emptyList()
-        return allIslands.filter { it.name.lowercase().contains(q) || it.fullName.lowercase().contains(q) }
+        return allIslands.filter { it.name.lowercase().contains(q) || it.originalName.lowercase().contains(q) || it.fullName.lowercase().contains(q) }
     }
 }

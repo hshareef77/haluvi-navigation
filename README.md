@@ -35,7 +35,11 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
   Your roads are kept when the offline map is updated, and are in the backup file.
 - **Save a place with its side** (here, on my left, on my right) for exact "destination on your left/right".
 - **What's around me**: nearest places with clock positions, by category.
-- **My places**: save, edit, delete, download island map (places and roads). One backup file (export and
+- **My places**: all places (saved by you, offline map, Google), nearest first; show by island, source or
+  category; rename, edit, delete; delete all Google or offline map places of an island.
+- **Islands**: "You are on …" / "At sea, … from …"; Manage islands: details, places on the island, offline
+  map, rename, change type (inhabited, uninhabited, resort, airport) and airport, restore original.
+- **My places** (backup): One backup file (export and
   import) holds places, your road names and routes.
 - **Get Google places** (optional): all places Google Maps has on an island, of every kind. The island is
   covered square by square and busy squares are split until nothing is missed; you choose which to save.

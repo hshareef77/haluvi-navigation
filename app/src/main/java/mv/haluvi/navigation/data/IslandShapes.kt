@@ -21,7 +21,8 @@ class IslandShapes(private val context: Context, private val islands: IslandRepo
 
     @Volatile private var rings: Map<String, List<LatLon>> = emptyMap()
     @Volatile private var islandRing: Map<String, String> = emptyMap()
-    @Volatile var extras: List<Island> = emptyList(); private set
+    @Volatile var extras: List<Island> = emptyList()
+        private set(value) { field = value; IslandOverrides.apply(value) }
     @Volatile private var osmNames: Map<String, String> = emptyMap()
     /** How each inhabited island was matched: "name", "inside" or "position". */
     @Volatile private var methods: Map<String, String> = emptyMap()
@@ -192,6 +193,7 @@ class IslandShapes(private val context: Context, private val islands: IslandRepo
             val c = corrected[isl.key] ?: original[isl.key] ?: continue
             isl.lat = c.lat; isl.lon = c.lon
         }
+        IslandOverrides.apply(islands.allIslands)
     }
 
     /** Result of matching one atoll. */
@@ -326,7 +328,8 @@ class IslandShapes(private val context: Context, private val islands: IslandRepo
         if (q.isEmpty()) return emptyList()
         val nq = normalizeName(q)
         return (islands.allIslands + extras).filter {
-            it.name.lowercase().contains(q) || it.fullName.lowercase().contains(q) || (nq.length >= 3 && normalizeName(it.name).contains(nq))
+            it.name.lowercase().contains(q) || it.originalName.lowercase().contains(q) || it.fullName.lowercase().contains(q) ||
+                (nq.length >= 3 && (normalizeName(it.name).contains(nq) || normalizeName(it.originalName).contains(nq)))
         }
     }
 

@@ -83,7 +83,7 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
             }
         } else ui.info("My island: waiting for GPS.")
         ui.button("Choose island") {
-            host.show { AtollPickerScreen { isl -> host.backTo(this@OfflineMapsScreen); host.show { OfflineIslandScreen(isl) } } }
+            host.show { AtollPickerScreen { isl -> host.backTo(this@OfflineMapsScreen); host.show { IslandDetailsScreen(isl) } } }
         }
         ui.button("Choose atoll") {
             host.show { ChoiceScreen("Choose atoll", null, g.islands.atolls.map { a -> OfflineMaps.atollText(a) to { host.show { OfflineAtollScreen(a) } } }) }
@@ -132,40 +132,7 @@ class OfflineAtollScreen(private val atoll: Atoll) : Screen(), OfflineProgressVi
             } }
         }
         ui.heading("Islands")
-        atoll.islands.forEach { isl -> ui.button(OfflineMaps.islandText(isl)) { host.show { OfflineIslandScreen(isl) } } }
-        ui.button("Back") { host.back() }
-        return scroll
-    }
-}
-
-class OfflineIslandScreen(private val island: Island) : Screen(), OfflineProgressView {
-    private var progressView: TextView? = null
-    override fun showProgress(text: String) { progressView?.text = text }
-
-    override fun create(): View {
-        val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title(island.fullName)
-        if (OfflineDownload.active) {
-            progressView = ui.info(OfflineDownload.progress)
-            ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
-            ui.button("Back") { host.back() }
-            return scroll
-        }
-        progressView = null
-        if (island.atollIndex < 0) {
-            ui.info("${island.spokenName}. Offline maps are downloaded for inhabited islands. This island's outline is already offline.")
-            ui.button("Back") { host.back() }
-            return scroll
-        }
-        ui.info(OfflineMaps.islandText(island))
-        if (OfflineDownload.lastResult.isNotBlank()) ui.info(OfflineDownload.lastResult)
-        val have = OfflineMaps.status(island.key) != null
-        ui.button(if (have) "Update" else "Download", color = UiColors.BUTTON_ON) { startOfflineDownload(host, listOf(island), island.name) }
-        if (have) ui.button("Delete", color = UiColors.BUTTON_STOP) {
-            host.show { ConfirmScreen("Delete the offline map of ${island.name}? Places you saved yourself are kept.", "Delete") {
-                val n = OfflineMaps.delete(listOf(island)); host.speak("$n places deleted."); host.back()
-            } }
-        }
+        atoll.islands.forEach { isl -> ui.button(OfflineMaps.islandText(isl)) { host.show { IslandDetailsScreen(isl) } } }
         ui.button("Back") { host.back() }
         return scroll
     }
