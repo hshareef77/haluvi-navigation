@@ -19,7 +19,7 @@ object WhereAmI {
         }
         RoadDetector.roadNameAt(f.lat, f.lon)?.let { parts.add("on $it") }
         val isl = g.shapes.islandAt(f.lat, f.lon) ?: g.islands.nearest(f.lat, f.lon)?.takeIf { it.distance <= 3000 }?.island
-        isl?.let { parts.add(if (it.type == "inhabited") it.fullName else it.spokenName) }
+        isl?.let { parts.add((if (it.type == "inhabited") it.fullName else it.spokenName) + Areas.suffix(it, f.lat, f.lon)) }
         return parts.joinToString(", ") + if (f.accuracy > 30) ", GPS is weak" else ""
     }
 
@@ -28,7 +28,7 @@ object WhereAmI {
         val g = AppGraph
         val f = g.location.fix ?: return "my island, waiting for GPS"
         fun nm(i: mv.haluvi.navigation.data.Island) = if (i.type == "inhabited") i.fullName else i.spokenName
-        g.shapes.islandAt(f.lat, f.lon)?.let { return "my island, ${nm(it)}, by GPS" }
+        g.shapes.islandAt(f.lat, f.lon)?.let { return "my island, ${nm(it)}${Areas.suffix(it, f.lat, f.lon)}, by GPS" }
         val hit = g.shapes.nearby(f.lat, f.lon, 30_000.0).firstOrNull()
         if (hit != null && hit.shore > 50) return "at sea, ${Phrases.distance(hit.shore)} from ${nm(hit.island)}"
         return g.islands.nearest(f.lat, f.lon)?.let { "my island, ${nm(it.island)}, by GPS" } ?: "my island, by GPS"
@@ -52,7 +52,7 @@ object WhereAmI {
     fun islandLine(): String {
         val g = AppGraph
         val f = g.location.fix ?: return "Waiting for GPS."
-        g.shapes.islandAt(f.lat, f.lon)?.let { return "You are on ${it.spokenName}." }
+        g.shapes.islandAt(f.lat, f.lon)?.let { return "You are on ${it.spokenName}${Areas.suffix(it, f.lat, f.lon)}." }
         val hit = g.shapes.nearby(f.lat, f.lon, 30_000.0).firstOrNull()
         if (hit != null && hit.shore > 50) return "At sea, ${Phrases.distance(hit.shore)} from ${hit.island.spokenName}."
         return g.islands.nearest(f.lat, f.lon)?.let { "Near ${it.island.name}." } ?: "Position known."
@@ -67,7 +67,7 @@ object WhereAmI {
         // With outlines: the island you are really on (also resorts and airports), or "at sea".
         val onIsland = g.shapes.islandAt(f.lat, f.lon)
         val islandText = when {
-            onIsland != null -> "On ${onIsland.spokenName}."
+            onIsland != null -> "On ${onIsland.spokenName}${Areas.suffix(onIsland, f.lat, f.lon)}."
             !g.shapes.isEmpty && g.islandWatcher.atSea(f) -> g.shapes.nearby(f.lat, f.lon, 20_000.0).firstOrNull()?.let {
                 "At sea, ${Phrases.distance(it.shore)} from ${it.island.spokenName}."
             } ?: "At sea."

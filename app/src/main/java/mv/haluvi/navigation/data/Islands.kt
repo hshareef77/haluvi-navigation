@@ -20,8 +20,11 @@ data class Island(val atollIndex: Int, val index: Int, var name: String, var lat
     /** An inhabited island that also has an airport (e.g. Hanimaadhoo). */
     var hasAirport: Boolean = false
 
-    /** Name with its kind for announcements: "Kandooma, resort", "Hanimaadhoo, with airport". */
-    val spokenName: String get() = when (type) {
+    /** The airport's own name, e.g. "Velana International Airport" on Hulhulé. */
+    var airportName: String = ""
+
+    /** Name with its kind for announcements: "Kandooma, resort", "Hanimaadhoo, with airport", "Hulhulé, Velana International Airport". */
+    val spokenName: String get() = if (airportName.isNotBlank() && (type == "airport" || hasAirport)) "$name, $airportName" else when (type) {
         "resort" -> "$name, resort"
         "airport" -> "$name, airport"
         "island" -> "$name, uninhabited island"

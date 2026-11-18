@@ -43,8 +43,12 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
   airport, restore original); download places; all places by source or category; My roads; backup.
 - **Joined islands** (one outline for two islands, e.g. Hulhudhoo and Meedhoo): each place goes to the island
   named in its address (Google, OpenStreetMap); otherwise a dividing line between the villages, learned from
-  the places with addresses, decides. Also used for "You are on …" and ferry arrivals. Move to another
-  island on each place.
+  the places with addresses or postcodes, decides; or the border you set yourself (standing there, or at a
+  place such as a school at the joining point). Hulhulé (Velana International Airport) is its own airport
+  island, joined to Hulhumalé. Move to another island on each place (kept in later re-checks).
+- **Areas inside an island** (Hulhumalé Phase 1 and Phase 2, or your own): "You are on Hulhumalé, Phase 2".
+- **Get Google places** retries failed searches, searches crowded spots down to 20 m and says whether the
+  search is complete.
 - **Places / Islands**: one From button that follows you ("From: my location, at Daily Print, on Ameenee
   Magu, Faafu Feeali"; "From: my island, Faafu Feeali, by GPS" or "at sea, 2 km from …") and a To button
   with distance and direction.

@@ -23,7 +23,9 @@ import mv.haluvi.navigation.net.OnlinePlace
  * With [onPick] it is a chooser (tap = choose); without it, it manages places (tap = place options).
  */
 /** Which places to show: one island, one source (saved by me, offline map, Google) or one category. */
-data class PlaceFilter(val islandKey: String? = null, val source: String? = null, val category: String? = null, val label: String = "")
+data class PlaceFilter(val islandKey: String? = null, val source: String? = null, val category: String? = null, val label: String = "",
+                       /** An area inside the island (for example Hulhumalé Phase 2). */
+                       val areaId: String? = null)
 
 fun sourceName(source: String): String = when (source) {
     SavedLocation.SOURCE_MANUAL -> "Saved by me"
@@ -65,6 +67,7 @@ class MyPlacesScreen(
             g.store.nearest(f.lat, f.lon, query, cat, filter?.islandKey).map { Triple(it.loc, it.distance, it.bearing) }
         else g.store.filtered(query, cat).filter { filter?.islandKey == null || it.islandKey == filter.islandKey }.map { Triple(it, null, null) }
         val rows = all.filter { filter?.source == null || it.first.source == filter.source }
+            .filter { r -> filter?.areaId == null || mv.haluvi.navigation.nav.Areas.at(r.first.islandKey, r.first.lat, r.first.lon, r.first.address)?.id == filter.areaId }
         if (f == null) ui.info("Waiting for GPS: sorted by name.")
         ui.info("${rows.size} places.")
         if (rows.isEmpty()) ui.info(if (g.store.items.isEmpty()) "No places yet. Save this place, or download the island map." else "No places found.")

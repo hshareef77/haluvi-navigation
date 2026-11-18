@@ -71,10 +71,10 @@ object AppGraph {
         shapes.joinedResolver = { group, lat, lon -> mv.haluvi.navigation.nav.JoinedIslands.byLine(group, lat, lon) }
         store.islandResolver = { loc -> mv.haluvi.navigation.nav.JoinedIslands.islandFor(loc.lat, loc.lon, loc.address) }
         // Once: put places already saved on joined islands on their own island.
-        if (settings.joinedRecheckVersion < 1) {
+        if (settings.joinedRecheckVersion < 2) {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 val moved = runCatching { mv.haluvi.navigation.nav.JoinedIslands.recheckAll() }.getOrDefault(0)
-                settings.joinedRecheckVersion = 1
+                settings.joinedRecheckVersion = 2
                 settings.joinedRecheckMessage = "Places on joined islands checked: $moved moved to their own island."
             }
         }

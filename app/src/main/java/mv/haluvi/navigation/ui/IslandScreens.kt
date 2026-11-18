@@ -61,12 +61,7 @@ class ManageScreen : Screen() {
         ui.button("Export backup: places, roads and routes") { exportBackup(host) }
         ui.button("Import backup") { importBackup(host) }
         ui.heading("Advanced")
-        ui.button("Joined islands: how places are split") {
-            host.show { TextScreen("Joined islands", listOfNotNull(
-                "Some islands are joined by land and share one outline, for example Hulhudhoo and Meedhoo. Each place goes to the island named in its address; otherwise a dividing line between the villages decides. The line is learned from the places with addresses.",
-                g.settings.joinedRecheckMessage.ifBlank { null }
-            ) + mv.haluvi.navigation.nav.JoinedIslands.report().split("\n\n")) }
-        }
+        ui.button("Joined islands and borders") { host.show { JoinedIslandsScreen() } }
         ui.button("Island outlines details") { host.show { IslandOutlinesScreen() } }
         ui.button("Share offline maps report") { shareText(host, "Haluvi offline maps report", OfflineMaps.report()) }
         ui.button("Back") { host.back() }
@@ -194,6 +189,14 @@ class IslandDetailsScreen(private val island: Island) : Screen(), OfflineProgres
             } }
         }
 
+        // Joined islands: set the border between this island and its neighbour.
+        mv.haluvi.navigation.nav.JoinedIslands.groupOf(isl)?.filter { it.key != isl.key }?.forEach { other ->
+            ui.button("Joined with ${other.name}: border") {
+                host.show { BorderScreen(isl.key, isl.name, other.key, other.name) { mv.haluvi.navigation.nav.JoinedIslands.recheckGroup(mv.haluvi.navigation.nav.JoinedIslands.groupOf(isl)!!) } }
+            }
+        }
+        ui.button("Areas on this island: ${mv.haluvi.navigation.nav.Areas.of(isl.key).size}") { host.show { AreasScreen(isl) } }
+
         ui.heading("Change island")
         ui.button("Rename") {
             host.show { TextInputScreen("Rename island", "Island name", isl.name) { n ->
@@ -213,8 +216,115 @@ class IslandDetailsScreen(private val island: Island) : Screen(), OfflineProgres
         if (isl.type != "airport") ui.button("Has an airport: ${if (isl.hasAirport) "Yes" else "No"}") {
             IslandOverrides.set(isl, hasAirport = !isl.hasAirport); host.say(if (isl.hasAirport) "Has an airport" else "No airport"); rebuild()
         }
+        if (isl.type == "airport" || isl.hasAirport) ui.button("Airport name: ${isl.airportName.ifBlank { "not set" }}") {
+            host.show { TextInputScreen("Airport name", "For example Velana International Airport", isl.airportName) { n ->
+                IslandOverrides.set(isl, airportName = n); host.speak("Saved."); host.back()
+            } }
+        }
         if (IslandOverrides.hasChange(isl.key)) ui.button("Restore the app's original name and type") {
             IslandOverrides.restore(isl); host.speak("Restored."); rebuild()
+        }
+        ui.button("Back") { host.back() }
+        return scroll
+    }
+}
+
+/** All joined islands: how each pair is split, and setting the border. */
+class JoinedIslandsScreen : Screen() {
+    override fun create(): View {
+        val g = AppGraph
+        val (scroll, ui) = UiBuilder.scrolling(host)
+        titleView = ui.title("Joined islands and borders")
+        ui.info("Some islands are joined by land and share one outline, for example Hulhudhoo and Meedhoo. Each place goes to the island named in its address. Otherwise the border decides: the one you set, or a line learned from addresses and postcodes. Setting the border yourself is the most reliable.")
+        if (g.settings.joinedRecheckMessage.isNotBlank()) ui.info(g.settings.joinedRecheckMessage)
+        val pairs = mv.haluvi.navigation.nav.JoinedIslands.pairs()
+        if (pairs.isEmpty()) ui.info("No joined islands.")
+        pairs.forEach { (a, b) ->
+            ui.info(mv.haluvi.navigation.nav.JoinedIslands.pairText(a, b))
+            ui.button("Set border: ${a.name} and ${b.name}") {
+                host.show { BorderScreen(a.key, a.name, b.key, b.name) { mv.haluvi.navigation.nav.JoinedIslands.groupOf(a)?.let { mv.haluvi.navigation.nav.JoinedIslands.recheckGroup(it) } ?: 0 } }
+            }
+        }
+        ui.button("Back") { host.back() }
+        return scroll
+    }
+}
+
+/**
+ * Sets the border between two joined islands (or two areas): standing at the border, or at a place such as a
+ * school at the joining point. [recheck] re-checks the places and returns how many moved.
+ */
+class BorderScreen(private val aKey: String, private val aName: String, private val bKey: String, private val bName: String,
+                   private val recheck: () -> Int) : Screen() {
+    override fun create(): View {
+        val J = mv.haluvi.navigation.nav.JoinedIslands
+        val (scroll, ui) = UiBuilder.scrolling(host)
+        titleView = ui.title("Border: $aName and $bName")
+        val cur = J.borderOf(aKey, bKey)
+        ui.info(if (cur != null) "A border you set is used." else "No border set yet: a learned line is used.")
+        fun apply(lat: Double, lon: Double, how: String) {
+            J.setBorder(aKey, bKey, mv.haluvi.navigation.core.LatLon(lat, lon))
+            val n = recheck()
+            host.speak("Border set $how. $n places moved."); host.backTo(this)
+            rebuild()
+        }
+        ui.button("Set border here", color = UiColors.BUTTON_ON) {
+            val f = AppGraph.location.fix
+            if (f == null || f.ageMs > 15_000 || f.accuracy > 25) host.speak("GPS is not accurate enough. Wait in an open place and try again.")
+            else apply(f.lat, f.lon, "here")
+        }
+        ui.button("Set border at a place") {
+            val pick: (SavedLocation) -> Unit = { loc -> apply(loc.lat, loc.lon, "at ${loc.name}") }
+            host.show {
+                ChoiceScreen("Border at a place", "For example a school or mosque at the joining point.", listOf(
+                    "My places" to { host.show { MyPlacesScreen(title = "Border place") { loc -> pick(loc) } } },
+                    "Search" to { PlacePick.handler = pick; host.show { SearchScreen() } }
+                ))
+            }
+        }
+        if (cur != null) ui.button("Clear my border", color = UiColors.BUTTON_STOP) {
+            J.setBorder(aKey, bKey, null); val n = recheck(); host.speak("Border cleared. $n places moved."); rebuild()
+        }
+        ui.button("Back") { host.back() }
+        return scroll
+    }
+}
+
+/** Areas inside an island (for example Hulhumalé Phase 1 and Phase 2). */
+class AreasScreen(private val isl: Island) : Screen() {
+    override fun create(): View {
+        val g = AppGraph
+        val A = mv.haluvi.navigation.nav.Areas
+        val (scroll, ui) = UiBuilder.scrolling(host)
+        titleView = ui.title("Areas on ${isl.name}")
+        ui.info("The island stays one island for trips and island alerts. The area is added to what you hear, for example \"You are on Hulhumale, Phase 2\".")
+        val list = A.of(isl.key)
+        val counts = HashMap<String, Int>()
+        if (list.size >= 2) g.store.items.filter { it.islandKey == isl.key }.forEach { p ->
+            A.at(isl.key, p.lat, p.lon, p.address)?.let { counts[it.id] = (counts[it.id] ?: 0) + 1 }
+        }
+        list.forEach { a ->
+            ui.button("${a.name}: ${counts[a.id] ?: 0} places") {
+                host.show { ChoiceScreen(a.name, null, listOf(
+                    "Places in ${a.name}" to { host.show { MyPlacesScreen(filter = PlaceFilter(islandKey = isl.key, areaId = a.id, label = "${isl.name}, ${a.name}")) } },
+                    "Rename" to { host.show { TextInputScreen("Rename area", "Area name", a.name) { n -> A.rename(a, n); host.speak("Saved."); host.back(); host.back() } } },
+                    "Move its point to my location" to {
+                        val f = g.location.fix
+                        if (f == null || f.accuracy > 30) host.speak("GPS is not accurate enough.") else { A.movePoint(a, f.lat, f.lon); host.speak("Moved."); host.back() }
+                    },
+                    "Delete" to { host.show { ConfirmScreen("Delete the area ${a.name}? Places are kept.", "Delete") { A.delete(a); host.back(); host.back() } } }
+                )) }
+            }
+        }
+        for (i in list.indices) for (j in i + 1 until list.size) {
+            val x = list[i]; val y = list[j]
+            ui.info(A.pairText(x, y))
+            ui.button("Set border: ${x.name} and ${y.name}") { host.show { BorderScreen(x.zone.key, x.name, y.zone.key, y.name) { 0 } } }
+        }
+        ui.button("Add an area here") {
+            val f = g.location.fix
+            if (f == null || f.accuracy > 30) host.speak("GPS is not accurate enough. Stand in the middle of the area in an open place.")
+            else host.show { TextInputScreen("New area", "Area name, for example Phase 2", "") { n -> A.add(isl.key, n, f.lat, f.lon); host.speak("Area $n added."); host.back() } }
         }
         ui.button("Back") { host.back() }
         return scroll

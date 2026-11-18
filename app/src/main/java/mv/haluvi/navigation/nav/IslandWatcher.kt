@@ -131,7 +131,7 @@ class IslandWatcher(
                     if (!v.arrived && now - v.slowSinceMs >= lim.stopMs) {
                         v.arrived = true
                         v.approached = true
-                        if (isDest) nav.arrivedAtIsland() else { announce("Arrived at $name.", flush = true); haptics.tick() }
+                        if (isDest) nav.arrivedAtIsland() else { announce("Arrived at $name${Areas.suffix(h.island, f.lat, f.lon)}.", flush = true); haptics.tick() }
                     }
                 } else v.slowSinceMs = 0L
             } else v.slowSinceMs = 0L

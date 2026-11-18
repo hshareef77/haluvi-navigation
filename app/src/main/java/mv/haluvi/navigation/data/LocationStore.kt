@@ -65,7 +65,9 @@ data class SavedLocation(
     var placeId: String = "",
     /** Where you stood on the road in front of the place (saved with "on my left / right"); 0 when not known. */
     var accessLat: Double = 0.0,
-    var accessLon: Double = 0.0
+    var accessLon: Double = 0.0,
+    /** You moved it to this island yourself: automatic re-checks keep it there. */
+    var islandFixed: Boolean = false
 ) {
     val hasAccess: Boolean get() = accessLat != 0.0 || accessLon != 0.0
     val isDownloadedMapPlace: Boolean get() = source == SOURCE_OSM_MAP
@@ -75,7 +77,7 @@ data class SavedLocation(
         .put("id", id).put("name", name).put("lat", lat).put("lon", lon)
         .put("accuracy", accuracy).put("savedTime", savedTime).put("source", source)
         .put("categoryId", categoryId).put("islandKey", islandKey).put("islandName", islandName)
-        .put("address", address).put("placeId", placeId).put("accessLat", accessLat).put("accessLon", accessLon)
+        .put("address", address).put("placeId", placeId).put("accessLat", accessLat).put("accessLon", accessLon).put("islandFixed", islandFixed)
 
     companion object {
         const val SOURCE_MANUAL = "manual"
@@ -100,7 +102,8 @@ data class SavedLocation(
                 address = o.optString("address", ""),
                 placeId = o.optString("placeId", ""),
                 accessLat = o.optDouble("accessLat", 0.0).takeIf { !it.isNaN() } ?: 0.0,
-                accessLon = o.optDouble("accessLon", 0.0).takeIf { !it.isNaN() } ?: 0.0
+                accessLon = o.optDouble("accessLon", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+                islandFixed = o.optBoolean("islandFixed", false)
             ).takeIf { !it.lat.isNaN() && !it.lon.isNaN() }
         }
     }

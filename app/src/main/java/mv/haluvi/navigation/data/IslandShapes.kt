@@ -22,7 +22,23 @@ class IslandShapes(private val context: Context, private val islands: IslandRepo
     @Volatile private var rings: Map<String, List<LatLon>> = emptyMap()
     @Volatile private var islandRing: Map<String, String> = emptyMap()
     @Volatile var extras: List<Island> = emptyList()
-        private set(value) { field = value; IslandOverrides.apply(value) }
+        private set(value) { field = withBuiltinExtras(value); IslandOverrides.apply(field) }
+
+    /**
+     * Islands the map joins to a neighbour but that are their own island: Hulhulé (Velana International
+     * Airport) is joined to Hulhumalé by reclaimed land, so it shares Hulhumalé's outline and is split from it
+     * like other joined islands.
+     */
+    private fun withBuiltinExtras(list: List<Island>): List<Island> {
+        val ring = islandRing[HULHUMALE] ?: return list
+        var out = list
+        if (out.none { it.key == HULHULE }) {
+            out = out + Island(-1, -1, "Hulhulé", 4.1918, 73.5291).also { it.key = HULHULE; it.type = "airport" }
+        }
+        if (islandRing[HULHULE] == null) islandRing = islandRing + (HULHULE to ring)
+        out.forEach { i -> BUILTIN_AIRPORT_NAMES[i.key]?.let { if (i.airportName.isBlank()) i.airportName = it } }
+        return out
+    }
     @Volatile private var osmNames: Map<String, String> = emptyMap()
     /** How each inhabited island was matched: "name", "inside" or "position". */
     @Volatile private var methods: Map<String, String> = emptyMap()
@@ -40,7 +56,7 @@ class IslandShapes(private val context: Context, private val islands: IslandRepo
     /** Built-in positions, kept so corrections can be re-applied or undone. */
     private val original: Map<String, LatLon> = islands.allIslands.associate { it.key to LatLon(it.lat, it.lon) }
 
-    init { load(); mergeBuiltin(); applyCorrections() }
+    init { load(); mergeBuiltin(); applyCorrections(); extras = extras }
 
     val count: Int get() = islands.allIslands.count { has(it.key) }
     val isEmpty: Boolean get() = islandRing.isEmpty()
@@ -343,6 +359,10 @@ class IslandShapes(private val context: Context, private val islands: IslandRepo
 
     companion object {
         /** Inhabited islands with an airport (local knowledge; map data may miss some). */
+        const val HULHUMALE = "K:Hulhumale'"
+        const val HULHULE = "K:Hulhule'"
+        /** Airport names for announcements ("Hulhulé, Velana International Airport"); can be changed per island. */
+        val BUILTIN_AIRPORT_NAMES = mapOf(HULHULE to "Velana International Airport")
         val KNOWN_AIRPORT_ISLANDS = setOf("HDh:Hanimadhoo", "Dh:Kudahuvadhoo", "Th:Thimarafushi", "Gn:Fuvahmulah", "B:Dharavandhoo", "ADh:Maamigili")
 
         /**

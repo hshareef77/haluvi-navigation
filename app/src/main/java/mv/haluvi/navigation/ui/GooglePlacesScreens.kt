@@ -37,7 +37,8 @@ object GooglePick {
  */
 object GoogleIslandSearch {
     private const val START_SIDE = 500.0   // metres
-    private const val MIN_SIDE = 40.0
+    /** Crowded spots are searched down to 20 m squares. */
+    private const val MIN_SIDE = 20.0
     const val MAX_REQUESTS_PER_ISLAND = 400
 
     data class Square(val lat: Double, val lon: Double, val side: Double) {
@@ -82,7 +83,11 @@ object GoogleIslandSearch {
         return out
     }
 
-    class Result(val found: List<GoogleFind>, val alreadySaved: Int, val requests: Int, val failed: Int, val limitReached: Boolean)
+    class Result(val found: List<GoogleFind>, val alreadySaved: Int, val requests: Int, val failed: Int, val limitReached: Boolean,
+                 /** Squares still full (20 places) at the smallest size: some places there may be missing. */
+                 val crowded: Int) {
+        val complete: Boolean get() = failed == 0 && !limitReached && crowded == 0
+    }
 
     /** Searches one island. [onStep] gets the number of requests made so far. Runs network calls on IO. */
     suspend fun search(isl: Island, onStep: (requests: Int, found: Int) -> Unit): Result {
@@ -91,7 +96,8 @@ object GoogleIslandSearch {
         val joined = mv.haluvi.navigation.nav.JoinedIslands.groupOf(isl)
         val found = LinkedHashMap<String, GoogleFind>()
         val saved = HashSet<String>()
-        var requests = 0; var failed = 0; var limit = false
+        var requests = 0; var failed = 0; var limit = false; var crowded = 0
+        val tries = HashMap<Square, Int>()
         while (queue.isNotEmpty()) {
             if (requests >= MAX_REQUESTS_PER_ISLAND) { limit = true; break }
             val sq = queue.removeFirst()
@@ -99,9 +105,14 @@ object GoogleIslandSearch {
             onStep(requests, found.size)
             val r = withContext(Dispatchers.IO) { runCatching { g.google.placesInCircle(sq.lat, sq.lon, sq.radius) } }
             val list = r.getOrNull()
-            if (list == null) { failed++; continue }
-            if (list.size >= 20 && sq.side / 2 >= MIN_SIDE) {
-                sq.split().filter { touches(isl, it) }.forEach { queue.addLast(it) }
+            if (list == null) {
+                // Network or server problem: try this square again later, up to 2 more times.
+                val t = (tries[sq] ?: 0) + 1; tries[sq] = t
+                if (t <= 2) { kotlinx.coroutines.delay(1500L * t); queue.addLast(sq) } else failed++
+                continue
+            }
+            if (list.size >= 20) {
+                if (sq.side / 2 >= MIN_SIDE) sq.split().filter { touches(isl, it) }.forEach { queue.addLast(it) } else crowded++
             }
             for (p in list) {
                 // Keep only places on this island (inside its outline, or at its shore such as jetties).
@@ -114,7 +125,7 @@ object GoogleIslandSearch {
                 found.putIfAbsent(f.key, f)
             }
         }
-        return Result(found.values.sortedBy { it.place.name.lowercase() }, saved.size, requests, failed, limit)
+        return Result(found.values.sortedBy { it.place.name.lowercase() }, saved.size, requests, failed, limit, crowded)
     }
 }
 
@@ -185,7 +196,8 @@ class GooglePlacesScreen(private val preset: Pair<List<Island>, String>? = null)
         host.speak("Searching Google places for $label.")
         GooglePick.job = host.scope.launch {
             val all = LinkedHashMap<String, GoogleFind>()
-            var saved = 0; var requests = 0; var failed = 0; var limited = 0
+            var saved = 0; var requests = 0; var failed = 0; var limited = 0; var crowded = 0
+            val incomplete = ArrayList<String>()
             val msg = try {
                 for ((ii, isl) in islands.withIndex()) {
                     val r = GoogleIslandSearch.search(isl) { n, f ->
@@ -194,8 +206,9 @@ class GooglePlacesScreen(private val preset: Pair<List<Island>, String>? = null)
                         progressView?.takeIf { host.currentScreen() === this@GooglePlacesScreen }?.text = step
                     }
                     r.found.forEach { all.putIfAbsent(it.key, it) }
-                    saved += r.alreadySaved; requests += r.requests; failed += r.failed
+                    saved += r.alreadySaved; requests += r.requests; failed += r.failed; crowded += r.crowded
                     if (r.limitReached) limited++
+                    if (!r.complete) incomplete.add(isl.name)
                 }
                 GooglePick.results = all.values.toList()
                 buildString {
@@ -203,6 +216,8 @@ class GooglePlacesScreen(private val preset: Pair<List<Island>, String>? = null)
                     if (saved > 0) append(" $saved more are already in My places.")
                     if (failed > 0) append(" $failed searches failed; search again later to fill gaps.")
                     if (limited > 0) append(" Search limit reached on $limited islands; some places may be missing.")
+                    if (crowded > 0) append(" $crowded very crowded spots still had 20 places at the smallest size; a few places there may be missing.")
+                    append(if (incomplete.isEmpty()) " Search complete." else " May be incomplete: ${incomplete.joinToString(", ")}.")
                     if (all.isNotEmpty()) append(" Select the ones to save.")
                 }
             } catch (e: CancellationException) {
