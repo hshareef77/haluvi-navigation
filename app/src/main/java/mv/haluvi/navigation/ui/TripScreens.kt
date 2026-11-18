@@ -34,8 +34,20 @@ fun goToPlace(host: MainActivity, loc: SavedLocation) {
 
 /** Places: walking or driving in a city or on an island. From, To, Travel, Start. */
 class PlacesScreen : Screen() {
-    private var preview: TextView? = null
-    private var hereView: TextView? = null
+    private var fromButton: android.widget.Button? = null
+    private var toButton: android.widget.Button? = null
+    private var tick = 0
+
+    private fun fromLabel(): String {
+        val from = AppGraph.store.byId(AppGraph.settings.placeFromId)
+        return "From: " + (from?.let { "${it.name}, chosen" } ?: "my location, ${mv.haluvi.navigation.nav.WhereAmI.placeParts()}") + ". Tap to change"
+    }
+
+    private fun toLabel(): String {
+        val to = Selection.placeTo ?: return "To: not chosen. Tap to choose"
+        val from = AppGraph.store.byId(AppGraph.settings.placeFromId)
+        return "To: ${to.name}, " + AppGraph.nav.previewText(Destination.of(to), from?.lat, from?.lon).trimEnd('.') + ". Tap to change"
+    }
 
     override fun create(): View {
         val g = AppGraph
@@ -46,16 +58,13 @@ class PlacesScreen : Screen() {
         val active = g.nav.target?.takeIf { it.kind == NavKind.PLACE }
         if (active != null) ui.button("Going to ${active.name}. Open", color = UiColors.BUTTON_ON) { host.showNavigation() }
 
-        val from = g.store.byId(s.placeFromId)
-        ui.button("From: " + (from?.name ?: "my location")) {
+        fromButton = ui.button(fromLabel()) {
             host.show { MyPlacesScreen(title = "From", firstChoice = "My location" to { s.placeFromId = ""; host.say("From: my location"); host.backTo(this@PlacesScreen) }) { loc ->
                 s.placeFromId = loc.id; host.say("From: ${loc.name}"); host.backTo(this@PlacesScreen)
             } }
         }
-        hereView = if (from == null) ui.info(mv.haluvi.navigation.nav.WhereAmI.placeLine()) else null
         val to = Selection.placeTo
-        ui.button("To: " + (to?.name ?: "not chosen")) { host.show { ChooseToScreen() } }
-        preview = to?.let { ui.info(previewText(it)) }
+        toButton = ui.button(toLabel()) { host.show { ChooseToScreen() } }
         ui.button("Travel: ${s.travelMode.label}") {
             s.travelMode = if (s.travelMode == TravelMode.WALKING) TravelMode.DRIVING else TravelMode.WALKING
             g.nav.refreshRoute()
@@ -77,16 +86,12 @@ class PlacesScreen : Screen() {
         return scroll
     }
 
-    private fun previewText(to: SavedLocation): String {
-        val from = AppGraph.store.byId(AppGraph.settings.placeFromId)
-        return AppGraph.nav.previewText(Destination.of(to), from?.lat, from?.lon)
-    }
-
+    /** Labels follow you as you move (every 5 seconds, so screen readers are not interrupted all the time). */
     override fun onSecond() {
-        Selection.placeTo?.let { preview?.text = previewText(it) }
-        if (tick++ % 5 == 0) hereView?.text = mv.haluvi.navigation.nav.WhereAmI.placeLine()
+        if (tick++ % 5 != 0) return
+        fromButton?.text = fromLabel()
+        toButton?.text = toLabel()
     }
-    private var tick = 0
 }
 
 /** Where to go: My places, Search, What's around me. */
@@ -104,11 +109,24 @@ class ChooseToScreen : Screen() {
 
 /** Islands: sea or air travel between islands. From, To, Travel, Start. */
 class IslandsScreen : Screen() {
-    private var preview: TextView? = null
-    private var hereView: TextView? = null
+    private var fromButton: android.widget.Button? = null
+    private var toButton: android.widget.Button? = null
     private var tick = 0
 
     private fun fromIsland(): Island? = AppGraph.islands.byKey(AppGraph.settings.islandFromKey)
+
+    private fun islandName(i: Island) = if (i.type == "inhabited") i.fullName else i.spokenName
+
+    private fun fromLabel(): String {
+        val manual = fromIsland()
+        return "From: " + (manual?.let { "${islandName(it)}, chosen" } ?: mv.haluvi.navigation.nav.WhereAmI.islandFromText()) + ". Tap to change"
+    }
+
+    private fun toLabel(): String {
+        val to = Selection.islandTo ?: return "To: not chosen. Tap to choose"
+        val from = fromIsland()
+        return "To: ${islandName(to)}, " + AppGraph.nav.previewText(Destination.of(to), from?.lat, from?.lon).trimEnd('.') + ". Tap to change"
+    }
 
     override fun create(): View {
         val g = AppGraph
@@ -119,26 +137,20 @@ class IslandsScreen : Screen() {
         val active = g.nav.target?.takeIf { it.kind == NavKind.ISLAND }
         if (active != null) ui.button("Going to ${active.name}. Open", color = UiColors.BUTTON_ON) { host.showNavigation() }
 
-        hereView = ui.info(mv.haluvi.navigation.nav.WhereAmI.islandLine())
-        val manual = fromIsland()
-        val gpsIsland = g.nav.currentIsland()
-        val fromText = manual?.name ?: gpsIsland?.let { "${it.name}, by GPS" } ?: "my GPS island"
-        ui.button("From: $fromText") {
+        fromButton = ui.button(fromLabel()) {
             host.show {
                 ChoiceScreen("From", null, listOf(
-                    "My GPS island" to { s.islandFromKey = ""; host.say("From: GPS island"); host.backTo(this@IslandsScreen) },
+                    "My island, by GPS" to { s.islandFromKey = ""; host.say("From: my island"); host.backTo(this@IslandsScreen) },
                     "Choose island" to { host.show { AtollPickerScreen { isl -> s.islandFromKey = isl.key; host.say("From: ${isl.name}"); host.backTo(this@IslandsScreen) } } }
                 ))
             }
         }
-        val to = Selection.islandTo
-        ui.button("To: " + (to?.fullName ?: "not chosen")) {
+        toButton = ui.button(toLabel()) {
             host.show { AtollPickerScreen { isl -> Selection.islandTo = isl; host.say("To: ${isl.name}"); host.backTo(this@IslandsScreen) } }
         }
-        preview = to?.let { ui.info(previewText(it)) }
-        ui.button("Travel: ${if (s.islandTravelAir) "Air" else "Sea"}") {
+        ui.button(if (s.islandTravelAir) "Travel: by air, plane or seaplane" else "Travel: by sea, ferry or boat") {
             s.islandTravelAir = !s.islandTravelAir
-            host.say("Travel: ${if (s.islandTravelAir) "air" else "sea"}")
+            host.say(if (s.islandTravelAir) "By air" else "By sea")
             rebuild()
         }
         ui.button("Start", color = UiColors.BUTTON_ON) {
@@ -150,21 +162,14 @@ class IslandsScreen : Screen() {
             }
         }
         islandAlertsToggle(this, ui)
-        ui.button("Manage islands: names, types, places") {
-            host.show { AtollPickerScreen { isl -> host.show { IslandDetailsScreen(isl) } } }
-        }
         ui.button("Back") { host.back() }
         return scroll
     }
 
-    private fun previewText(to: Island): String {
-        val from = fromIsland()
-        return AppGraph.nav.previewText(Destination.of(to), from?.lat, from?.lon)
-    }
-
     override fun onSecond() {
-        Selection.islandTo?.let { preview?.text = previewText(it) }
-        if (tick++ % 5 == 0) hereView?.text = mv.haluvi.navigation.nav.WhereAmI.islandLine()
+        if (tick++ % 5 != 0) return
+        fromButton?.text = fromLabel()
+        toButton?.text = toLabel()
     }
 }
 

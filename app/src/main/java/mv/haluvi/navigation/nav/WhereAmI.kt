@@ -9,6 +9,31 @@ import mv.haluvi.navigation.core.Geo
 /** "Where am I": nearest named place, road and island. Google first (Lua v101), offline fallback. */
 object WhereAmI {
     /** Short offline description of where you are, for the Places screen: "near City Pharmacy, on Majeedhee Magu, Feeali". */
+    /** "at Daily Print, on Ameenee Magu, Faafu Feeali" (offline), or "waiting for GPS". */
+    fun placeParts(): String {
+        val g = AppGraph
+        val f = g.location.fix ?: return "waiting for GPS"
+        val parts = ArrayList<String>()
+        g.store.nearest(f.lat, f.lon).firstOrNull()?.let { h ->
+            if (h.distance <= 15) parts.add("at ${h.loc.name}") else if (h.distance <= 80) parts.add("near ${h.loc.name}")
+        }
+        RoadDetector.roadNameAt(f.lat, f.lon)?.let { parts.add("on $it") }
+        val isl = g.shapes.islandAt(f.lat, f.lon) ?: g.islands.nearest(f.lat, f.lon)?.takeIf { it.distance <= 3000 }?.island
+        isl?.let { parts.add(if (it.type == "inhabited") it.fullName else it.spokenName) }
+        return parts.joinToString(", ") + if (f.accuracy > 30) ", GPS is weak" else ""
+    }
+
+    /** "my island, Faafu Feeali, by GPS" or "at sea, 2 kilometers from Faafu Feeali". */
+    fun islandFromText(): String {
+        val g = AppGraph
+        val f = g.location.fix ?: return "my island, waiting for GPS"
+        fun nm(i: mv.haluvi.navigation.data.Island) = if (i.type == "inhabited") i.fullName else i.spokenName
+        g.shapes.islandAt(f.lat, f.lon)?.let { return "my island, ${nm(it)}, by GPS" }
+        val hit = g.shapes.nearby(f.lat, f.lon, 30_000.0).firstOrNull()
+        if (hit != null && hit.shore > 50) return "at sea, ${Phrases.distance(hit.shore)} from ${nm(hit.island)}"
+        return g.islands.nearest(f.lat, f.lon)?.let { "my island, ${nm(it.island)}, by GPS" } ?: "my island, by GPS"
+    }
+
     fun placeLine(): String {
         val g = AppGraph
         val f = g.location.fix ?: return "Waiting for GPS."

@@ -37,8 +37,13 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
 - **What's around me**: nearest places with clock positions, by category.
 - **My places**: all places (saved by you, offline map, Google), nearest first; show by island, source or
   category; rename, edit, delete; delete all Google or offline map places of an island.
-- **Islands**: "You are on …" / "At sea, … from …"; Manage islands: details, places on the island, offline
-  map, rename, change type (inhabited, uninhabited, resort, airport) and airport, restore original.
+- **Settings → Manage islands and places**: atolls and islands with offline place counts; atoll details
+  (download OpenStreetMap map or Google places for the atoll); island details (places by source, roads,
+  outline, places list, download or delete OpenStreetMap map, Google places, rename, change type and
+  airport, restore original); download places; all places by source or category; My roads; backup.
+- **Places / Islands**: one From button that follows you ("From: my location, at Daily Print, on Ameenee
+  Magu, Faafu Feeali"; "From: my island, Faafu Feeali, by GPS" or "at sea, 2 km from …") and a To button
+  with distance and direction.
 - **My places** (backup): One backup file (export and
   import) holds places, your road names and routes.
 - **Get Google places** (optional): all places Google Maps has on an island, of every kind. The island is

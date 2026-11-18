@@ -138,8 +138,17 @@ class LocationStore(private val context: Context, private val islands: IslandRep
         }
     }
 
+    @Volatile private var countsCache: Map<String, Int>? = null
+
+    /** Number of offline places (saved on the phone) per island key. */
+    fun countsByIsland(): Map<String, Int> =
+        countsCache ?: synchronized(this) { _items.groupingBy { it.islandKey }.eachCount() }.also { countsCache = it }
+
+    fun offlineCount(islandKey: String): Int = countsByIsland()[islandKey] ?: 0
+
     @Synchronized
     fun save() {
+        countsCache = null
         val arr = JSONArray()
         _items.forEach { arr.put(it.toJson()) }
         val tmp = File(file.parentFile, file.name + ".tmp")

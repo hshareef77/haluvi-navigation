@@ -47,17 +47,9 @@ class MyPlacesScreen(
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title(if (filter != null) "$title: ${filter.label}" else title)
         firstChoice?.let { (label, action) -> ui.button(label) { action() } }
-        if (!forGoTo && filter == null) ui.button("Add and manage") {
-            host.show {
-                ChoiceScreen("Add and manage", null, listOf(
-                    "Save this place" to { host.show { SavePlaceScreen() } },
-                    "Offline maps" to { host.show { OfflineMapsScreen() } },
-                    "Get Google places" to { host.show { GooglePlacesScreen() } },
-                    "My roads" to { host.show { MyRoadsScreen() } },
-                    "Import backup" to { host.back(); importPlaces() },
-                    "Export backup: places, road names and routes" to { host.back(); exportPlaces() }
-                ))
-            }
+        if (!forGoTo && filter == null) {
+            ui.button("Save this place") { host.show { SavePlaceScreen() } }
+            ui.button("Manage islands and places") { host.show { ManageScreen() } }
         }
         if (filter == null) ui.button("Show: near me. Change") { chooseView() }
         else filter.islandKey?.let { key -> g.islands.byKey(key) ?: g.shapes.extras.firstOrNull { it.key == key } }?.let { isl ->
@@ -110,44 +102,46 @@ class MyPlacesScreen(
         }
     }
 
-    private fun importPlaces() {
-        host.pickFile(arrayOf("text/plain", "application/json", "application/octet-stream", "*/*")) { uri ->
-            if (uri == null) return@pickFile
-            host.scope.launch {
-                val result = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val text = host.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
-                        val places = AppGraph.store.import(text)
-                        val routes = runCatching {
-                            org.json.JSONObject(text.trim()).optJSONArray("routes")?.let { AppGraph.routes.import(it) }
-                        }.getOrNull()
-                        Triple(places, AppGraph.store.lastImportedRoadNames, routes)
-                    }
+}
+
+/** Import a backup file: places, road names and routes. */
+fun importBackup(host: MainActivity) {
+    host.pickFile(arrayOf("text/plain", "application/json", "application/octet-stream", "*/*")) { uri ->
+        if (uri == null) return@pickFile
+        host.scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = host.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+                    val places = AppGraph.store.import(text)
+                    val routes = runCatching {
+                        org.json.JSONObject(text.trim()).optJSONArray("routes")?.let { AppGraph.routes.import(it) }
+                    }.getOrNull()
+                    Triple(places, AppGraph.store.lastImportedRoadNames, routes)
                 }
-                result.onSuccess { (places, roads, routes) ->
-                    val (added, skipped) = places
-                    if (roads > 0) mv.haluvi.navigation.nav.RoadDetector.version++
-                    host.speak("$added places imported." + (if (skipped > 0) " $skipped already saved." else "") +
-                        (if (roads > 0) " $roads road names imported." else "") +
-                        (routes?.let { (ra, rs) -> (if (ra > 0) " $ra routes imported." else "") + (if (rs > 0) " $rs routes already saved." else "") } ?: ""))
-                    rebuild()
-                }.onFailure { host.speak("This file could not be imported.") }
             }
+            result.onSuccess { (places, roads, routes) ->
+                val (added, skipped) = places
+                if (roads > 0) mv.haluvi.navigation.nav.RoadDetector.version++
+                host.speak("$added places imported." + (if (skipped > 0) " $skipped already saved." else "") +
+                    (if (roads > 0) " $roads road names imported." else "") +
+                    (routes?.let { (ra, rs) -> (if (ra > 0) " $ra routes imported." else "") + (if (rs > 0) " $rs routes already saved." else "") } ?: ""))
+                host.rebuild()
+            }.onFailure { host.speak("This file could not be imported.") }
         }
     }
+}
 
-    private fun exportPlaces() {
-        host.createFile("haluvi-backup.json", "application/json") { uri ->
-            if (uri == null) return@createFile
-            host.scope.launch {
-                val ok = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val json = org.json.JSONObject(AppGraph.store.exportJson()).put("routes", AppGraph.routes.exportJson()).toString(2)
-                        host.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
-                    }.isSuccess
-                }
-                host.speak(if (ok) "Exported: places, road names and routes." else "Export failed.")
+fun exportBackup(host: MainActivity) {
+    host.createFile("haluvi-backup.json", "application/json") { uri ->
+        if (uri == null) return@createFile
+        host.scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    val json = org.json.JSONObject(AppGraph.store.exportJson()).put("routes", AppGraph.routes.exportJson()).toString(2)
+                    host.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
+                }.isSuccess
             }
+            host.speak(if (ok) "Exported: places, road names and routes." else "Export failed.")
         }
     }
 }
@@ -397,17 +391,29 @@ class AtollPickerScreen(private val onPick: (Island) -> Unit) : Screen() {
         }
         ui.button("Airports") { host.show { AirportsScreen(onPick) } }
         if (g.shapes.extras.isNotEmpty()) ui.button("Resorts and other islands nearby") { host.show { OtherIslandsScreen(onPick) } }
-        g.islands.atolls.forEach { a -> ui.button(a.fullName) { host.show { IslandPickerScreen(a, onPick) } } }
+        ui.heading("Atolls")
+        g.islands.atolls.forEach { a -> ui.button(atollLabel(a)) { host.show { IslandPickerScreen(a, onPick) } } }
         ui.button("Back") { host.back() }
         return scroll
     }
 }
 
-/** "Kandooma, resort, 3.2 kilometers" or "Haa Alifu Dhidhoo". */
-fun islandLabel(isl: Island): String {
+/** "34 offline places" or "no offline places" (places saved on the phone: they work without internet). */
+fun offlinePlacesText(n: Int): String = when (n) { 0 -> "no offline places"; 1 -> "1 offline place"; else -> "$n offline places" }
+
+/** "Kandooma, resort, 3.2 kilometers" or "Faafu Feeali, 34 offline places, 0.2 kilometers". */
+fun islandLabel(isl: Island, withAtoll: Boolean = true): String {
     val f = AppGraph.location.fix
     val dist = f?.let { ", " + Phrases.distance(Geo.distance(it.lat, it.lon, isl.lat, isl.lon)) } ?: ""
-    return (if (isl.type == "inhabited") isl.fullName else isl.spokenName) + dist
+    val name = if (isl.type == "inhabited" && isl.hasAirport) (if (withAtoll) isl.fullName else isl.name) + ", with airport"
+        else if (isl.type == "inhabited") (if (withAtoll) isl.fullName else isl.name) else isl.spokenName
+    return name + ", " + offlinePlacesText(AppGraph.store.offlineCount(isl.key)) + dist
+}
+
+/** "Faafu, 5 islands, 120 offline places". */
+fun atollLabel(a: Atoll): String {
+    val counts = AppGraph.store.countsByIsland()
+    return "${a.fullName}, ${a.islands.size} islands, ${offlinePlacesText(a.islands.sumOf { counts[it.key] ?: 0 })}"
 }
 
 /** Nearest resorts, airports and uninhabited named islands (from the downloaded outlines). */
@@ -428,12 +434,10 @@ class OtherIslandsScreen(private val onPick: (Island) -> Unit) : Screen() {
 class IslandPickerScreen(private val atoll: Atoll, private val onPick: (Island) -> Unit) : Screen() {
     override fun create(): View {
         val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title(atoll.fullName)
+        titleView = ui.title(atollLabel(atoll))
         val f = AppGraph.location.fix
-        atoll.islands.forEach { island ->
-            val extra = f?.let { ", " + Phrases.distance(Geo.distance(it.lat, it.lon, island.lat, island.lon)) } ?: ""
-            ui.button(island.name + extra) { onPick(island) }
-        }
+        val list = if (f != null) atoll.islands.sortedBy { Geo.distance(f.lat, f.lon, it.lat, it.lon) } else atoll.islands
+        list.forEach { island -> ui.button(islandLabel(island, withAtoll = false)) { onPick(island) } }
         ui.button("Back") { host.back() }
         return scroll
     }

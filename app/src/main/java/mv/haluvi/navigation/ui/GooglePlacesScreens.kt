@@ -117,8 +117,9 @@ object GoogleIslandSearch {
  * user chooses (with the place ID; positions refreshed regularly), but not storing Google data in bulk,
  * so the user reviews the list and saves what they want (Select all is offered at the top).
  */
-class GooglePlacesScreen : Screen() {
+class GooglePlacesScreen(private val preset: Pair<List<Island>, String>? = null) : Screen() {
     private var progressView: TextView? = null
+    private var presetAsked = false
 
     override fun create(): View {
         val g = AppGraph
@@ -140,7 +141,8 @@ class GooglePlacesScreen : Screen() {
             return scroll
         }
         progressView = null
-        ui.info("Finds all places Google Maps has on an island, of every kind. The island is searched part by part; busy parts are searched more closely. You choose which places to save. Saved places work offline for routing, Explore and What's around me.")
+        if (preset != null && !presetAsked) { presetAsked = true; scroll.post { confirm(preset.first, preset.second) } }
+        ui.info("Google places need your API key and may cost money. Finds all places Google Maps has on an island, of every kind. The island is searched part by part; busy parts are searched more closely. You choose which places to save. Saved places work offline for routing, Explore and What's around me.")
         if (GooglePick.lastMessage.isNotBlank()) ui.info(GooglePick.lastMessage)
         if (GooglePick.results.isNotEmpty()) ui.button("Show last results: ${GooglePick.results.size}") { host.show { GooglePickResultsScreen() } }
         val mine = OfflineMaps.myIsland()
