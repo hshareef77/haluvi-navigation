@@ -61,6 +61,12 @@ class ManageScreen : Screen() {
         ui.button("Export backup: places, roads and routes") { exportBackup(host) }
         ui.button("Import backup") { importBackup(host) }
         ui.heading("Advanced")
+        ui.button("Joined islands: how places are split") {
+            host.show { TextScreen("Joined islands", listOfNotNull(
+                "Some islands are joined by land and share one outline, for example Hulhudhoo and Meedhoo. Each place goes to the island named in its address; otherwise a dividing line between the villages decides. The line is learned from the places with addresses.",
+                g.settings.joinedRecheckMessage.ifBlank { null }
+            ) + mv.haluvi.navigation.nav.JoinedIslands.report().split("\n\n")) }
+        }
         ui.button("Island outlines details") { host.show { IslandOutlinesScreen() } }
         ui.button("Share offline maps report") { shareText(host, "Haluvi offline maps report", OfflineMaps.report()) }
         ui.button("Back") { host.back() }
@@ -105,7 +111,9 @@ class AtollDetailsScreen(private val atoll: Atoll) : Screen(), OfflineProgressVi
             return scroll
         }
         progressView = null
-        ui.info("${atoll.islands.size} inhabited islands. " + placesBreakdown(atoll.islands.map { it.key }) + " " + OfflineMaps.atollText(atoll).substringAfter(": ") + ".")
+        val done = atoll.islands.count { OfflineMaps.status(it.key) != null }
+        ui.info("${atoll.islands.size} inhabited islands. " + placesBreakdown(atoll.islands.map { it.key }) + " " +
+            (if (done == 0) "No OpenStreetMap map yet." else "OpenStreetMap map: $done of ${atoll.islands.size} islands."))
         if (OfflineDownload.lastResult.isNotBlank()) ui.info(OfflineDownload.lastResult)
         ui.heading("Islands")
         val f = g.location.fix

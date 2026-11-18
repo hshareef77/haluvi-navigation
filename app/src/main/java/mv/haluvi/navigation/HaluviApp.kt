@@ -67,6 +67,17 @@ object AppGraph {
         routeTrip = mv.haluvi.navigation.nav.RouteTrip(app)
         routeRecorder = mv.haluvi.navigation.nav.RouteRecorder(app)
         location.addListener { f -> mv.haluvi.navigation.nav.RoadDetector.onFix(f) }
+        // Joined islands (one outline for two islands): address first, then the learned dividing line.
+        shapes.joinedResolver = { group, lat, lon -> mv.haluvi.navigation.nav.JoinedIslands.byLine(group, lat, lon) }
+        store.islandResolver = { loc -> mv.haluvi.navigation.nav.JoinedIslands.islandFor(loc.lat, loc.lon, loc.address) }
+        // Once: put places already saved on joined islands on their own island.
+        if (settings.joinedRecheckVersion < 1) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                val moved = runCatching { mv.haluvi.navigation.nav.JoinedIslands.recheckAll() }.getOrDefault(0)
+                settings.joinedRecheckVersion = 1
+                settings.joinedRecheckMessage = "Places on joined islands checked: $moved moved to their own island."
+            }
+        }
         compass.onCalibrationNeeded = {
             if (nav.isActive || explore.active) speaker.speak("Compass needs calibration. Move the phone in a figure eight.", flush = false)
         }

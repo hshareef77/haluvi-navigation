@@ -126,7 +126,7 @@ object OfflineMaps {
                 // 3. Put each place and road on its island.
                 val placesBy = HashMap<String, MutableList<SavedLocation>>()
                 for (p in placeList) {
-                    val isl = islandFor(group, p.lat, p.lon) ?: continue
+                    val isl = islandFor(group, p.lat, p.lon, p.address) ?: continue
                     placesBy.getOrPut(isl.key) { ArrayList() }.add(
                         SavedLocation(SavedLocation.newId(), p.name, p.lat, p.lon, 0.0, source = SavedLocation.SOURCE_OSM_MAP,
                             categoryId = p.categoryId.takeIf { it != "other" } ?: Categories.guess(p.name + " " + p.typeText),
@@ -203,10 +203,12 @@ object OfflineMaps {
     }
 
     /** The chosen island a point belongs to: inside its outline, or the nearest one within 2.5 km. */
-    private fun islandFor(group: List<Island>, lat: Double, lon: Double): Island? {
+    private fun islandFor(group: List<Island>, lat: Double, lon: Double, address: String? = null): Island? {
         val g = AppGraph
         val inside = group.filter { g.shapes.inside(it.key, lat, lon) }
         if (inside.size == 1) return inside[0]
+        // Joined islands share one outline: the address, then the learned dividing line.
+        if (inside.size > 1) return JoinedIslands.fromAddress(address, inside) ?: JoinedIslands.byLine(inside, lat, lon)
         val pool = inside.ifEmpty { group }
         // Joined islands share one outline: the nearest island centre decides.
         val best = pool.minByOrNull { Geo.distance(lat, lon, it.lat, it.lon) } ?: return null

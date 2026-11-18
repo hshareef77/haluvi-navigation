@@ -411,7 +411,8 @@ class OpenStreetMap {
                 else continue
             }
             if (type == "parking" || type == "waste basket" || type == "bench" && t.optString("name").isBlank()) continue
-            val addr = listOf(t.optString("addr:street"), t.optString("addr:housename")).filter { it.isNotBlank() }.joinToString(", ")
+            val addr = listOf("addr:housename", "addr:street", "addr:suburb", "addr:place", "addr:city", "addr:island", "is_in")
+                .map { t.optString(it) }.filter { it.isNotBlank() }.distinct().joinToString(", ")
             val key = name.lowercase() + String.format(java.util.Locale.US, "%.5f%.5f", lat, lon)
             if (seen.add(key)) out.add(MapPlace(name, lat, lon, cat, type, addr))
         }

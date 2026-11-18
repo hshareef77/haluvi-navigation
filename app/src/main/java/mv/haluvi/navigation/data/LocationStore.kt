@@ -156,12 +156,16 @@ class LocationStore(private val context: Context, private val islands: IslandRep
         if (!tmp.renameTo(file)) { file.writeText(arr.toString()); tmp.delete() }
     }
 
+    /** Picks the island for a place on a landmass shared by joined islands (set by the app). */
+    var islandResolver: ((SavedLocation) -> Island?)? = null
+
     fun ensureIsland(loc: SavedLocation) {
         if (loc.islandKey.isNotBlank() && islands.byKey(loc.islandKey) != null) {
             if (loc.islandName.isBlank()) loc.islandName = islands.byKey(loc.islandKey)!!.fullName
             return
         }
-        islands.nearest(loc.lat, loc.lon)?.let { loc.islandKey = it.island.key; loc.islandName = it.island.fullName }
+        (runCatching { islandResolver?.invoke(loc) }.getOrNull() ?: islands.nearest(loc.lat, loc.lon)?.island)
+            ?.let { loc.islandKey = it.key; loc.islandName = it.fullName }
     }
 
     fun byId(id: String?): SavedLocation? = if (id.isNullOrBlank()) null else _items.firstOrNull { it.id == id }

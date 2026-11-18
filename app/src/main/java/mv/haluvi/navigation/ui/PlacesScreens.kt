@@ -163,6 +163,16 @@ class PlaceScreen(private val id: String) : Screen() {
         ui.info(parts.joinToString(" "))
         ui.button("Go there", color = UiColors.BUTTON_ON) { goToPlace(host, loc) }
         ui.button("Edit") { host.show { EditPlaceScreen(id) } }
+        ui.button("Move to another island") {
+            fun move(isl: Island) { mv.haluvi.navigation.nav.JoinedIslands.moveTo(loc, isl); host.speak("${loc.name} is now on ${isl.name}."); host.backTo(this@PlaceScreen) }
+            val cur = g.islands.byKey(loc.islandKey)
+            val joined = cur?.let { mv.haluvi.navigation.nav.JoinedIslands.groupOf(it) }?.filter { it.key != loc.islandKey }.orEmpty()
+            host.show {
+                ChoiceScreen("Move ${loc.name} to", "Now on ${cur?.name ?: "no island"}.",
+                    joined.map { isl -> "${isl.name}, joined island" to { move(isl) } } +
+                        listOf("Choose island" to { host.show { AtollPickerScreen { isl -> move(isl) } } }))
+            }
+        }
         ui.button("Delete", color = UiColors.BUTTON_STOP) {
             host.show { ConfirmScreen("Delete ${loc.name}?", "Delete") {
                 g.store.delete(id); host.speak("Deleted."); host.back(); host.back()

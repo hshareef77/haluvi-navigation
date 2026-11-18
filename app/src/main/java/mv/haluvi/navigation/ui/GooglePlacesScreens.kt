@@ -51,7 +51,9 @@ object GoogleIslandSearch {
         }
     }
 
-    private fun touches(isl: Island, sq: Square): Boolean = AppGraph.shapes.shoreDistance(isl, sq.lat, sq.lon) <= sq.radius
+    /** The square reaches the island, and (for joined islands) is not clearly on the other island's side. */
+    private fun touches(isl: Island, sq: Square): Boolean = AppGraph.shapes.shoreDistance(isl, sq.lat, sq.lon) <= sq.radius &&
+        mv.haluvi.navigation.nav.JoinedIslands.mightBelong(isl, sq.lat, sq.lon, sq.radius)
 
     /** The starting squares (500 m) that touch the island. */
     fun startSquares(isl: Island): List<Square> {
@@ -86,6 +88,7 @@ object GoogleIslandSearch {
     suspend fun search(isl: Island, onStep: (requests: Int, found: Int) -> Unit): Result {
         val g = AppGraph
         val queue = ArrayDeque(startSquares(isl))
+        val joined = mv.haluvi.navigation.nav.JoinedIslands.groupOf(isl)
         val found = LinkedHashMap<String, GoogleFind>()
         val saved = HashSet<String>()
         var requests = 0; var failed = 0; var limit = false
@@ -103,6 +106,9 @@ object GoogleIslandSearch {
             for (p in list) {
                 // Keep only places on this island (inside its outline, or at its shore such as jetties).
                 if (g.shapes.shoreDistance(isl, p.lat, p.lon) > 100) continue
+                // Joined islands: only places of this island (by address, else the dividing line).
+                if (joined != null && (mv.haluvi.navigation.nav.JoinedIslands.fromAddress(p.address, joined)
+                        ?: mv.haluvi.navigation.nav.JoinedIslands.byLine(joined, p.lat, p.lon)).key != isl.key) continue
                 val f = GoogleFind(p, Categories.guess(p.typeText + " " + p.name), isl)
                 if (g.store.findDuplicate(p.name, p.lat, p.lon) != null) { saved.add(f.key); continue }
                 found.putIfAbsent(f.key, f)

@@ -35,6 +35,9 @@ class Settings(context: Context) {
     var islandArrivalDistance by int("islandArrivalDistance", 1000)
     /** Routes: announce every stop (true) or only your own stop (false). */
     var routeAnnounceAll by bool("routeAnnounceAll", true)
+    /** Joined islands: the one-time re-check of saved places was done (1). */
+    var joinedRecheckVersion by int("joinedRecheckVersion", 0)
+    var joinedRecheckMessage by string("joinedRecheckMessage", "")
     /** Routes: "Your stop is coming" this many metres before a place stop. */
     var routeWarnMeters by int("routeWarnMeters", 200)
     /** "Approaching / Arrived at / Passing" island announcements during island trips and Explore at sea. */

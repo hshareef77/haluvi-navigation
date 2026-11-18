@@ -41,6 +41,10 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
   (download OpenStreetMap map or Google places for the atoll); island details (places by source, roads,
   outline, places list, download or delete OpenStreetMap map, Google places, rename, change type and
   airport, restore original); download places; all places by source or category; My roads; backup.
+- **Joined islands** (one outline for two islands, e.g. Hulhudhoo and Meedhoo): each place goes to the island
+  named in its address (Google, OpenStreetMap); otherwise a dividing line between the villages, learned from
+  the places with addresses, decides. Also used for "You are on …" and ferry arrivals. Move to another
+  island on each place.
 - **Places / Islands**: one From button that follows you ("From: my location, at Daily Print, on Ameenee
   Magu, Faafu Feeali"; "From: my island, Faafu Feeali, by GPS" or "at sea, 2 km from …") and a To button
   with distance and direction.

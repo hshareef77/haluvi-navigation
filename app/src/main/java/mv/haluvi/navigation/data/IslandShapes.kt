@@ -302,20 +302,28 @@ class IslandShapes(private val context: Context, private val islands: IslandRepo
      * Islands (inhabited and other named) whose centre is within [maxCentre] metres, nearest shore first.
      * Islands joined into one landmass are reported once: the one whose centre is nearest.
      */
-    fun nearby(lat: Double, lon: Double, maxCentre: Double = 20_000.0): List<ShoreHit> {
+    /**
+     * Chooses among islands sharing one outline (joined by land) which one a position belongs to.
+     * Set by the app (address and dividing-line logic); without it the nearest island centre decides.
+     */
+    var joinedResolver: ((group: List<Island>, lat: Double, lon: Double) -> Island)? = null
+
+    fun nearby(lat: Double, lon: Double, maxCentre: Double = 20_000.0, resolve: Boolean = true): List<ShoreHit> {
         val all = ArrayList<ShoreHit>()
         islands.within(lat, lon, maxCentre).forEach { all.add(ShoreHit(it.island, shoreDistance(it.island, lat, lon), it.distance)) }
         for (e in extras) {
             val c = Geo.distance(lat, lon, e.lat, e.lon)
             if (c <= maxCentre) all.add(ShoreHit(e, shoreDistance(e, lat, lon), c))
         }
-        val best = LinkedHashMap<String, ShoreHit>()
-        for (h in all) {
-            val group = ringId(h.island.key) ?: ("centre:" + h.island.key)
-            val cur = best[group]
-            if (cur == null || h.centre < cur.centre) best[group] = h
-        }
-        return best.values.sortedBy { it.shore }
+        val byGroup = LinkedHashMap<String, MutableList<ShoreHit>>()
+        for (h in all) byGroup.getOrPut(ringId(h.island.key) ?: ("centre:" + h.island.key)) { ArrayList() }.add(h)
+        val r = joinedResolver
+        return byGroup.values.map { hits ->
+            if (hits.size > 1 && resolve && r != null) {
+                val chosen = runCatching { r(hits.map { it.island }, lat, lon) }.getOrNull()
+                hits.firstOrNull { it.island.key == chosen?.key } ?: hits.minByOrNull { it.centre }!!
+            } else hits.minByOrNull { it.centre }!!
+        }.sortedBy { it.shore }
     }
 
     /** The island you are on (inside its outline), or null. */
