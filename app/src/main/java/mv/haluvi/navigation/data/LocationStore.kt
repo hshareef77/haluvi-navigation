@@ -137,7 +137,9 @@ class LocationStore(private val context: Context, private val islands: IslandRep
         if (!file.exists()) return
         runCatching {
             val arr = JSONArray(file.readText())
-            for (i in 0 until arr.length()) SavedLocation.fromJson(arr.getJSONObject(i))?.let { ensureIsland(it); _items.add(it) }
+            // A place keeps its island (also airport islands, resorts and other islands); only places
+            // without an island get one here.
+            for (i in 0 until arr.length()) SavedLocation.fromJson(arr.getJSONObject(i))?.let { if (it.islandKey.isBlank()) ensureIsland(it); _items.add(it) }
         }
     }
 
@@ -162,9 +164,13 @@ class LocationStore(private val context: Context, private val islands: IslandRep
     /** Picks the island for a place on a landmass shared by joined islands (set by the app). */
     var islandResolver: ((SavedLocation) -> Island?)? = null
 
+    /** Finds any island by key: inhabited, or airport, resort and other islands (set by the app). */
+    var knownIsland: ((String) -> Island?)? = null
+
     fun ensureIsland(loc: SavedLocation) {
-        if (loc.islandKey.isNotBlank() && islands.byKey(loc.islandKey) != null) {
-            if (loc.islandName.isBlank()) loc.islandName = islands.byKey(loc.islandKey)!!.fullName
+        val known = if (loc.islandKey.isBlank()) null else (islands.byKey(loc.islandKey) ?: knownIsland?.invoke(loc.islandKey))
+        if (known != null) {
+            if (loc.islandName.isBlank()) loc.islandName = known.fullName
             return
         }
         (runCatching { islandResolver?.invoke(loc) }.getOrNull() ?: islands.nearest(loc.lat, loc.lon)?.island)

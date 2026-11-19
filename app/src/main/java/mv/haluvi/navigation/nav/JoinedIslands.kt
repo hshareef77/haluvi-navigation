@@ -215,6 +215,24 @@ object JoinedIslands {
         return "${a.name} and ${b.name}. $how$agree $counts"
     }
 
+    /** For the backup file. */
+    @Synchronized fun exportJson(): JSONObject {
+        ensureBorders()
+        val o = JSONObject(); borders.forEach { (k, v) -> o.put(k, JSONObject().put("lat", v.lat).put("lon", v.lon)) }
+        return o
+    }
+
+    /** From a backup file: borders are added (replacing the same pair). Returns how many. */
+    @Synchronized fun importJson(o: JSONObject): Int {
+        ensureBorders()
+        var n = 0
+        o.keys().forEach { k -> runCatching { val p = o.getJSONObject(k); borders[k] = LatLon(p.getDouble("lat"), p.getDouble("lon")); n++ } }
+        val out = JSONObject(); borders.forEach { (k, v) -> out.put(k, JSONObject().put("lat", v.lat).put("lon", v.lon)) }
+        runCatching { bordersFile?.writeText(out.toString()) }
+        version++; splitCache.clear()
+        return n
+    }
+
     // ------------------------------------------------------------------ re-checking places
 
     /** Puts the saved places of one joined group on their own island (address first, then the line). Places you moved yourself are kept. */
@@ -225,7 +243,9 @@ object JoinedIslands {
         var moved = 0
         for (p in g.store.items) {
             if (p.islandFixed) continue
-            if (p.islandKey !in keys && !g.shapes.inside(k0, p.lat, p.lon)) continue
+            // Places given to one of these islands, on their shared land, or at its shore (a jetty) and on no other island.
+            if (p.islandKey !in keys && !g.shapes.inside(k0, p.lat, p.lon) &&
+                !(g.shapes.shoreDistance(group[0], p.lat, p.lon) <= 100 && g.shapes.islandAt(p.lat, p.lon) == null)) continue
             val isl = fromAddress(p.address, group) ?: byLine(group, p.lat, p.lon)
             if (isl.key != p.islandKey) { p.islandKey = isl.key; p.islandName = isl.fullName; moved++ }
         }

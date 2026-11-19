@@ -228,13 +228,16 @@ open class ChoiceScreen(
     }
 }
 
-class ConfirmScreen(private val question: String, private val yesLabel: String, private val onYes: () -> Unit) : Screen() {
+class ConfirmScreen(private val question: String, private val yesLabel: String, private val cancelFirst: Boolean = false,
+                    private val onYes: () -> Unit) : Screen() {
     override fun create(): View {
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title("Please confirm")
         ui.info(question)
+        // For actions that may cost money, Cancel comes first so it is not pressed by mistake.
+        if (cancelFirst) ui.button("Cancel") { host.back() }
         ui.button(yesLabel, color = UiColors.BUTTON_STOP) { onYes() }
-        ui.button("Cancel") { host.back() }
+        if (!cancelFirst) ui.button("Cancel") { host.back() }
         return scroll
     }
 }

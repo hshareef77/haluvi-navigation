@@ -59,6 +59,33 @@ object IslandOverrides {
         save()
     }
 
+    /** For the backup file. */
+    @Synchronized fun exportJson(): JSONObject {
+        val o = JSONObject()
+        changes.forEach { (k, c) ->
+            val j = JSONObject()
+            c.name?.let { j.put("name", it) }; c.type?.let { j.put("type", it) }
+            c.hasAirport?.let { j.put("airport", it) }; c.airportName?.let { j.put("airportName", it) }
+            o.put(k, j)
+        }
+        return o
+    }
+
+    /** From a backup file: island changes are applied to [all] islands. Returns how many. */
+    @Synchronized fun importJson(o: JSONObject, all: List<Island>): Int {
+        var n = 0
+        o.keys().forEach { k ->
+            runCatching {
+                val c = o.getJSONObject(k)
+                val isl = all.firstOrNull { it.key == k } ?: return@runCatching
+                set(isl, c.optString("name").ifBlank { null }, c.optString("type").ifBlank { null },
+                    if (c.has("airport")) c.getBoolean("airport") else null, c.optString("airportName").ifBlank { null })
+                n++
+            }
+        }
+        return n
+    }
+
     private fun load() {
         changes.clear()
         val f = file ?: return

@@ -69,12 +69,13 @@ object AppGraph {
         location.addListener { f -> mv.haluvi.navigation.nav.RoadDetector.onFix(f) }
         // Joined islands (one outline for two islands): address first, then the learned dividing line.
         shapes.joinedResolver = { group, lat, lon -> mv.haluvi.navigation.nav.JoinedIslands.byLine(group, lat, lon) }
+        store.knownIsland = { key -> islands.byKey(key) ?: shapes.extras.firstOrNull { it.key == key } }
         store.islandResolver = { loc -> mv.haluvi.navigation.nav.JoinedIslands.islandFor(loc.lat, loc.lon, loc.address) }
         // Once: put places already saved on joined islands on their own island.
-        if (settings.joinedRecheckVersion < 2) {
+        if (settings.joinedRecheckVersion < 3) {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 val moved = runCatching { mv.haluvi.navigation.nav.JoinedIslands.recheckAll() }.getOrDefault(0)
-                settings.joinedRecheckVersion = 2
+                settings.joinedRecheckVersion = 3
                 settings.joinedRecheckMessage = "Places on joined islands checked: $moved moved to their own island."
             }
         }

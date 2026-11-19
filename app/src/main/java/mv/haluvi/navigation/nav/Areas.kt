@@ -62,6 +62,27 @@ object Areas {
     @Synchronized fun movePoint(a: Area, lat: Double, lon: Double) { ensure(); a.lat = lat; a.lon = lon; save() }
     @Synchronized fun delete(a: Area) { ensure(); items.removeAll { it.id == a.id }; save() }
 
+    /** For the backup file. */
+    @Synchronized fun exportJson(): JSONArray {
+        ensure()
+        val arr = JSONArray()
+        items.forEach { a -> arr.put(JSONObject().put("id", a.id).put("island", a.islandKey).put("name", a.name).put("lat", a.lat).put("lon", a.lon)) }
+        return arr
+    }
+
+    /** From a backup file: areas with the same id are replaced. Returns how many. */
+    @Synchronized fun importJson(arr: JSONArray): Int {
+        ensure()
+        var n = 0
+        for (i in 0 until arr.length()) runCatching {
+            val o = arr.getJSONObject(i)
+            val a = Area(o.getString("id"), o.getString("island"), o.getString("name"), o.getDouble("lat"), o.getDouble("lon"))
+            items.removeAll { it.id == a.id }; items.add(a); n++
+        }
+        save()
+        return n
+    }
+
     /** "Phase 2", "phase II", "Phase-2" all become "phase2". */
     private fun norm(s: String): String = s.lowercase()
         .replace(Regex("\\bii\\b"), "2").replace(Regex("\\biii\\b"), "3").replace(Regex("\\bi\\b"), "1")

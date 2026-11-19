@@ -107,7 +107,9 @@ class MyPlacesScreen(
 
 }
 
-/** Import a backup file: places, road names and routes. */
+private var importedExtras = 0
+
+/** Import a backup file: places, road names, routes, borders, areas and island changes. */
 fun importBackup(host: MainActivity) {
     host.pickFile(arrayOf("text/plain", "application/json", "application/octet-stream", "*/*")) { uri ->
         if (uri == null) return@pickFile
@@ -116,10 +118,15 @@ fun importBackup(host: MainActivity) {
                 runCatching {
                     val text = host.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
                     val places = AppGraph.store.import(text)
-                    val routes = runCatching {
-                        org.json.JSONObject(text.trim()).optJSONArray("routes")?.let { AppGraph.routes.import(it) }
-                    }.getOrNull()
-                    Triple(places, AppGraph.store.lastImportedRoadNames, routes)
+                    val root = runCatching { org.json.JSONObject(text.trim()) }.getOrNull()
+                    val routes = runCatching { root?.optJSONArray("routes")?.let { AppGraph.routes.import(it) } }.getOrNull()
+                    // Borders, areas and island changes, then the places on joined islands are re-checked.
+                    var extra = 0
+                    runCatching { root?.optJSONObject("islandChanges")?.let { extra += mv.haluvi.navigation.data.IslandOverrides.importJson(it, AppGraph.islands.allIslands + AppGraph.shapes.extras) } }
+                    runCatching { root?.optJSONArray("areas")?.let { extra += mv.haluvi.navigation.nav.Areas.importJson(it) } }
+                    runCatching { root?.optJSONObject("borders")?.let { extra += mv.haluvi.navigation.nav.JoinedIslands.importJson(it) } }
+                    if (extra > 0) runCatching { mv.haluvi.navigation.nav.JoinedIslands.recheckAll() }
+                    Triple(places, AppGraph.store.lastImportedRoadNames, routes).also { importedExtras = extra }
                 }
             }
             result.onSuccess { (places, roads, routes) ->
@@ -127,7 +134,8 @@ fun importBackup(host: MainActivity) {
                 if (roads > 0) mv.haluvi.navigation.nav.RoadDetector.version++
                 host.speak("$added places imported." + (if (skipped > 0) " $skipped already saved." else "") +
                     (if (roads > 0) " $roads road names imported." else "") +
-                    (routes?.let { (ra, rs) -> (if (ra > 0) " $ra routes imported." else "") + (if (rs > 0) " $rs routes already saved." else "") } ?: ""))
+                    (routes?.let { (ra, rs) -> (if (ra > 0) " $ra routes imported." else "") + (if (rs > 0) " $rs routes already saved." else "") } ?: "") +
+                    (if (importedExtras > 0) " Borders, areas and island changes restored." else ""))
                 host.rebuild()
             }.onFailure { host.speak("This file could not be imported.") }
         }
@@ -140,11 +148,15 @@ fun exportBackup(host: MainActivity) {
         host.scope.launch {
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
-                    val json = org.json.JSONObject(AppGraph.store.exportJson()).put("routes", AppGraph.routes.exportJson()).toString(2)
+                    val json = org.json.JSONObject(AppGraph.store.exportJson()).put("routes", AppGraph.routes.exportJson())
+                        .put("borders", mv.haluvi.navigation.nav.JoinedIslands.exportJson())
+                        .put("areas", mv.haluvi.navigation.nav.Areas.exportJson())
+                        .put("islandChanges", mv.haluvi.navigation.data.IslandOverrides.exportJson())
+                        .toString(2)
                     host.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
                 }.isSuccess
             }
-            host.speak(if (ok) "Exported: places, road names and routes." else "Export failed.")
+            host.speak(if (ok) "Exported: places, roads, routes, borders, areas and island changes." else "Export failed.")
         }
     }
 }
@@ -426,7 +438,36 @@ fun islandLabel(isl: Island, withAtoll: Boolean = true): String {
 /** "Faafu, 5 islands, 120 offline places". */
 fun atollLabel(a: Atoll): String {
     val counts = AppGraph.store.countsByIsland()
-    return "${a.fullName}, ${a.islands.size} islands, ${offlinePlacesText(a.islands.sumOf { counts[it.key] ?: 0 })}"
+    return "${a.fullName}, ${islandsText(a.islands.size)}, ${offlinePlacesText(a.islands.sumOf { counts[it.key] ?: 0 })}"
+}
+
+fun islandsText(n: Int) = if (n == 1) "1 island" else "$n islands"
+
+/** When each island was last searched on Google (kept on the phone). */
+object GoogleSearchedDates {
+    private val file get() = java.io.File(AppGraph.appContext.filesDir, "google_searched.json")
+    private var map: MutableMap<String, Long>? = null
+    @Synchronized private fun m(): MutableMap<String, Long> = map ?: HashMap<String, Long>().also { mm ->
+        runCatching { val o = org.json.JSONObject(file.readText()); o.keys().forEach { k -> mm[k] = o.getLong(k) } }
+        map = mm
+    }
+    @Synchronized fun get(key: String): Long? = m()[key]
+    @Synchronized fun set(key: String, ms: Long) {
+        m()[key] = ms
+        val o = org.json.JSONObject(); m().forEach { (k, v) -> o.put(k, v) }
+        runCatching { file.writeText(o.toString()) }
+    }
+    fun dateText(ms: Long): String = java.text.DateFormat.getDateInstance(java.text.DateFormat.LONG).format(java.util.Date(ms))
+
+    /** "last Google search 15 November 2026" (latest of the islands), "never searched on Google", or partly. */
+    fun text(islands: List<mv.haluvi.navigation.data.Island>): String {
+        val dates = islands.mapNotNull { get(it.key) }
+        return when {
+            dates.isEmpty() -> "never searched on Google"
+            dates.size < islands.size -> "last Google search ${dateText(dates.max())} (${dates.size} of ${islands.size} islands)"
+            else -> "last Google search ${dateText(dates.max())}"
+        }
+    }
 }
 
 /** Nearest resorts, airports and uninhabited named islands (from the downloaded outlines). */

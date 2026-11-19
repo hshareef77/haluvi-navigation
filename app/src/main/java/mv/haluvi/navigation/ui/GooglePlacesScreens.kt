@@ -90,7 +90,7 @@ object GoogleIslandSearch {
     }
 
     /** Searches one island. [onStep] gets the number of requests made so far. Runs network calls on IO. */
-    suspend fun search(isl: Island, onStep: (requests: Int, found: Int) -> Unit): Result {
+    suspend fun search(isl: Island, onStep: (requests: Int, found: Int, saved: Int) -> Unit): Result {
         val g = AppGraph
         val queue = ArrayDeque(startSquares(isl))
         val joined = mv.haluvi.navigation.nav.JoinedIslands.groupOf(isl)
@@ -102,7 +102,7 @@ object GoogleIslandSearch {
             if (requests >= MAX_REQUESTS_PER_ISLAND) { limit = true; break }
             val sq = queue.removeFirst()
             requests++
-            onStep(requests, found.size)
+            onStep(requests, found.size, saved.size)
             val r = withContext(Dispatchers.IO) { runCatching { g.google.placesInCircle(sq.lat, sq.lon, sq.radius) } }
             val list = r.getOrNull()
             if (list == null) {
@@ -171,7 +171,7 @@ class GooglePlacesScreen(private val preset: Pair<List<Island>, String>? = null)
         ui.button("Choose atoll") {
             host.show {
                 ChoiceScreen("Choose atoll", null, g.islands.atolls.map { a ->
-                    "${a.fullName}, ${a.islands.size} islands" to { confirm(a.islands, a.fullName) }
+                    "${atollGoogleText(a.islands)}, ${GoogleSearchedDates.text(a.islands)}".let { "${a.fullName}, ${islandsText(a.islands.size)}, $it" } to { confirm(a.islands, a.fullName) }
                 })
             }
         }
@@ -179,12 +179,24 @@ class GooglePlacesScreen(private val preset: Pair<List<Island>, String>? = null)
         return scroll
     }
 
-    /** Shows how many Google searches are needed, then starts. */
+    /** "2,732 offline places (2,732 Google)" for these islands. */
+    private fun atollGoogleText(islands: List<Island>): String {
+        val keys = islands.map { it.key }.toSet()
+        val items = AppGraph.store.items.filter { it.islandKey in keys }
+        val google = items.count { it.source == mv.haluvi.navigation.data.SavedLocation.SOURCE_GOOGLE }
+        return offlinePlacesText(items.size) + if (items.isNotEmpty()) " ($google Google)" else ""
+    }
+
+    /** Shows what is already saved, when it was last searched and how many Google searches are needed, then starts. */
     private fun confirm(islands: List<Island>, label: String) {
         val n = islands.sumOf { GoogleIslandSearch.startSquares(it).size }
+        val what = if (islands.size > 1) "$label (${islandsText(islands.size)})" else label
+        val text = "Search $what on Google.\n" +
+            "Already saved: ${atollGoogleText(islands)}. ${GoogleSearchedDates.text(islands).replaceFirstChar { it.uppercase() }}.\n" +
+            "Estimated: about $n to ${n * 3} Google searches; crowded areas need more. Your free amount is about 5,000 searches a month; after that they may cost money.\n" +
+            "Places already saved are not added again."
         host.show {
-            ConfirmScreen("Search $label: at least $n Google searches; busy areas need more (Male' can need 100 to 200). " +
-                "This uses part of your Google free monthly amount, or may cost money. Continue?", "Search") {
+            ConfirmScreen(text, "Search", cancelFirst = true) {
                 host.backTo(this@GooglePlacesScreen); start(islands, label)
             }
         }
@@ -200,8 +212,8 @@ class GooglePlacesScreen(private val preset: Pair<List<Island>, String>? = null)
             val incomplete = ArrayList<String>()
             val msg = try {
                 for ((ii, isl) in islands.withIndex()) {
-                    val r = GoogleIslandSearch.search(isl) { n, f ->
-                        val step = "${if (islands.size > 1) "Island ${ii + 1} of ${islands.size}, " else ""}${isl.name}: search ${n}. ${all.size + f} places so far."
+                    val r = GoogleIslandSearch.search(isl) { n, f, sv ->
+                        val step = "${if (islands.size > 1) "Island ${ii + 1} of ${islands.size}: " else ""}${isl.name}, search $n. $f new, $sv already saved. ${all.size + f} new places so far."
                         GooglePick.progress = step
                         progressView?.takeIf { host.currentScreen() === this@GooglePlacesScreen }?.text = step
                     }
@@ -209,6 +221,7 @@ class GooglePlacesScreen(private val preset: Pair<List<Island>, String>? = null)
                     saved += r.alreadySaved; requests += r.requests; failed += r.failed; crowded += r.crowded
                     if (r.limitReached) limited++
                     if (!r.complete) incomplete.add(isl.name)
+                    GoogleSearchedDates.set(isl.key, System.currentTimeMillis())
                 }
                 GooglePick.results = all.values.toList()
                 buildString {

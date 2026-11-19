@@ -48,7 +48,9 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
   island, joined to Hulhumalé. Move to another island on each place (kept in later re-checks).
 - **Areas inside an island** (Hulhumalé Phase 1 and Phase 2, or your own): "You are on Hulhumalé, Phase 2".
 - **Get Google places** retries failed searches, searches crowded spots down to 20 m and says whether the
-  search is complete.
+  search is complete. Before searching it shows what is already saved, when each island was last searched,
+  and an estimate of the Google searches; during the search, new and already saved places.
+- **Backup** holds places, roads, routes, borders, areas and island changes.
 - **Places / Islands**: one From button that follows you ("From: my location, at Daily Print, on Ameenee
   Magu, Faafu Feeali"; "From: my island, Faafu Feeali, by GPS" or "at sea, 2 km from …") and a To button
   with distance and direction.
