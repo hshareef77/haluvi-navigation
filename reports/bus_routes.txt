@@ -1,0 +1,107 @@
+Bus routes in OpenStreetMap, Maldives: 6 routes, 0 route groups.
+
+R1: West Park to HM Phase 1
+  From: West Park  To: West Park  Operator: MTCC  Network: RTL
+  16 stops, road line 16647 m from 52 road pieces
+   1. Dharumavantha Hospital (West Side) Bus Stop  (4.172771, 73.500821)
+   2. West Park OPP  (4.177492, 73.502535)
+   3. Food Court  (4.172021, 73.503408)
+   4. Ministry of National Planning, Housing and Infrastructure  (4.171763, 73.503476)
+   5. Dharumavantha School  (4.169277, 73.509372)
+   6. Male' Swimming Track  (4.169851, 73.514317)
+   7. Hulhumalé Cemetery  (4.20751, 73.539962)
+   8. Skate Park  (4.207421, 73.541767)
+   9. Flat No. 137  (4.209948, 73.542601)
+   10. Fedhires Park  (4.211524, 73.543115)
+   11. Flat No. 147  (4.213232, 73.543649)
+   12. Ruhgandu 1  (4.216151, 73.544605)
+   13. Dhiraagu  (4.21987, 73.545699)
+   14. Hulhumalé Police Station  (4.216777, 73.542108)
+   15. Amin Avenue  (4.214298, 73.540357)
+   16. MNDF Flat  (4.210707, 73.539818)
+
+R10: Orchid Route
+  From: Dharumavantha Hospital (West Side)  To: Dharumavantha Hospital (West Side) OPP  Operator: MTCC  Network: RTL
+  17 stops, road line 45 m from 1 road pieces
+   1. Dharumavantha Hospital (West Side) Bus Stop  (4.172771, 73.500821)
+   2. Maaveyo Maizaan  (4.175911, 73.505798)
+   3. Hilaaleege  (4.177595, 73.507226)
+   4. Justice Building  (4.178446, 73.50848)
+   5. Jumhoore Maidaan  (4.178898, 73.511009)
+   6. Jetty No.5  (4.178745, 73.513711)
+   7. MTCC Tower  (4.178186, 73.515578)
+   8. Carnival  (4.176967, 73.517983)
+   9. Artificial Beach  (4.175064, 73.517976)
+   10. Muni Ufaa  (4.174424, 73.516858)
+   11. Ibrahim Mosque  (4.174662, 73.514326)
+   12. Olympus  (4.174973, 73.511504)
+   13. City Square  (4.175168, 73.50973)
+   14. Maaveyo Magu  (4.175422, 73.507432)
+   15. Fini Park  (4.175676, 73.504988)
+   16. Social Centre  (4.175965, 73.502101)
+   17. Maafannu Madharusaa Bus Stop  (4.176, 73.502418)
+
+R11: Ameenee Route
+  From: Raalhugandu Bus Stop  To: Henveiru Stadium Bus Stop  Operator: MTCC  Network: RTL
+  18 stops, road line 4443 m from 17 road pieces
+   1. Raalhugandu (Mini Bus)  (4.173291, 73.517821)
+   2. Dharubaaruge Bus Stop  (4.170742, 73.516292)
+   3. Kudakudhinge Bageecha Bus Stop  (4.170966, 73.514191)
+   4. Male' Hiya Bus Stop  (4.17118, 73.512259)
+   5. Rehendhi Flat Bus Stop  (4.171324, 73.510386)
+   6. MIRA Bus Stop  (4.171609, 73.508236)
+   7. Maafannu Stadium Bus Stop  (4.171881, 73.505608)
+   8. Ministry of Environment Bus Stop  (4.172039, 73.504174)
+   9. Maafannu Ferry Terminal Bus Stop  (4.172273, 73.502108)
+   10. Dharumavantha Hospital (West Side) Bus Stop  (4.172771, 73.500821)
+   11. Maafannu Madharusaa Bus Stop  (4.176, 73.502418)
+   12. Odeon Bus Stop  (4.175573, 73.506588)
+   13. Zikura Mosque Bus Stop  (4.175407, 73.508235)
+   14. City Square (North Side)  (4.175215, 73.509863)
+   15. Billoorijehige Bus Stop  (4.175011, 73.511553)
+   16. Heenaamaage Bus Stop  (4.174821, 73.513789)
+   17. Dhamanaveshi Bus Stop  (4.174643, 73.515277)
+   18. Henveiru Stadium Bus Stop  (4.174448, 73.517125)
+
+R12: Sosun Route
+  From: MTCC Sawmill  To: Henveiru Stadium  Operator: Rajje Transport Link  Network: 
+  8 stops, road line 2480 m from 15 road pieces
+   1. MTCC Sawmill  (4.176749, 73.517854)
+   2. Minstry of Foreign Affairs  (4.17848, 73.514048)
+   3. Jumhoore Maidaan  (4.178898, 73.511009)
+   4. Velaanaage  (4.178298, 73.513249)
+   5. Majeedhiyya School  (4.17753, 73.51525)
+   6. Islamic University of Maldives  (4.175956, 73.514961)
+   7. Dhamanaveshi Bus Stop  (4.174643, 73.515277)
+   8. Henveiru Stadium Bus Stop  (4.174448, 73.517125)
+
+R13: Villimale Internal
+  From:   To:   Operator: RTL  Network: 
+  11 stops, road line 1816 m from 16 road pieces
+   1. BML Villimale Branch  (4.174494, 73.485985)
+   2. Muhiyyiddin School  (4.173228, 73.485895)
+   3. MNDF Flats  (4.1723, 73.485624)
+   4. Sinaai Sarahadhu  (4.171686, 73.485148)
+   5. Salaam Miskiy  (4.172169, 73.484291)
+   6. Boalha Dhandu  (4.173049, 73.484228)
+   7. Vaaru Hingun  (4.173533, 73.483717)
+   8. Viludhooni Park  (4.174063, 73.483204)
+   9. Jumhooree Hingun  (4.174869, 73.483705)
+   10. Villimale Beach  (4.175359, 73.484158)
+   11. Villimale Harbour  (4.176057, 73.484514)
+
+R2: Carnival to HM Phase 1
+  From: Carnival  To: Carnival  Operator: MTCC  Network: RTL
+  12 stops, road line 16983 m from 83 road pieces
+   1. Carnival  (4.17695, 73.517941)
+   2. Raalhugandu  (4.173144, 73.517815)
+   3. Flat No. 120  (4.210846, 73.541768)
+   4. Flat No. 147  (4.213213, 73.543726)
+   5. Centro Mall  (4.216307, 73.542617)
+   6. CHSE  (4.221104, 73.541479)
+   7. Amin Avenue  (4.214304, 73.540279)
+   8. MNDF Flat  (4.210736, 73.53972)
+   9. Hulhumalé Cemetery  (4.207433, 73.53994)
+   10. Senahiya  (4.172354, 73.516713)
+   11. Artificial Beach (West Side)  (4.174163, 73.517849)
+   12. Carnival  (4.17695, 73.517941)

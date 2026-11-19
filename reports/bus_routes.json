@@ -1,0 +1,670 @@
+{
+ "source": "OpenStreetMap contributors (Geofabrik extract)",
+ "routes": [
+  {
+   "id": 19930588,
+   "ref": "R1",
+   "name": "West Park to HM Phase 1",
+   "from": "West Park",
+   "to": "West Park",
+   "operator": "MTCC",
+   "network": "RTL",
+   "fee": "",
+   "stops": [
+    {
+     "id": 11936631796,
+     "name": "Dharumavantha Hospital (West Side) Bus Stop",
+     "lat": 4.172771,
+     "lon": 73.500821,
+     "role": "platform"
+    },
+    {
+     "id": 13359712855,
+     "name": "West Park OPP",
+     "lat": 4.177492,
+     "lon": 73.502535,
+     "role": "platform"
+    },
+    {
+     "id": 13359712856,
+     "name": "Food Court",
+     "lat": 4.172021,
+     "lon": 73.503408,
+     "role": "platform"
+    },
+    {
+     "id": 13359712857,
+     "name": "Ministry of National Planning, Housing and Infrastructure",
+     "lat": 4.171763,
+     "lon": 73.503476,
+     "role": "platform"
+    },
+    {
+     "id": 13359712858,
+     "name": "Dharumavantha School",
+     "lat": 4.169277,
+     "lon": 73.509372,
+     "role": "platform"
+    },
+    {
+     "id": 13359712860,
+     "name": "Male' Swimming Track",
+     "lat": 4.169851,
+     "lon": 73.514317,
+     "role": "platform"
+    },
+    {
+     "id": 11941175872,
+     "name": "Hulhumalé Cemetery",
+     "lat": 4.20751,
+     "lon": 73.539962,
+     "role": "platform"
+    },
+    {
+     "id": 13359712861,
+     "name": "Skate Park",
+     "lat": 4.207421,
+     "lon": 73.541767,
+     "role": "platform"
+    },
+    {
+     "id": 13359712862,
+     "name": "Flat No. 137",
+     "lat": 4.209948,
+     "lon": 73.542601,
+     "role": "platform"
+    },
+    {
+     "id": 13359712863,
+     "name": "Fedhires Park",
+     "lat": 4.211524,
+     "lon": 73.543115,
+     "role": "platform"
+    },
+    {
+     "id": 13358001826,
+     "name": "Flat No. 147",
+     "lat": 4.213232,
+     "lon": 73.543649,
+     "role": "platform"
+    },
+    {
+     "id": 13359712864,
+     "name": "Ruhgandu 1",
+     "lat": 4.216151,
+     "lon": 73.544605,
+     "role": "platform"
+    },
+    {
+     "id": 13359712865,
+     "name": "Dhiraagu",
+     "lat": 4.21987,
+     "lon": 73.545699,
+     "role": "platform"
+    },
+    {
+     "id": 11183603540,
+     "name": "Hulhumalé Police Station",
+     "lat": 4.216777,
+     "lon": 73.542108,
+     "role": "platform"
+    },
+    {
+     "id": 10770510805,
+     "name": "Amin Avenue",
+     "lat": 4.214298,
+     "lon": 73.540357,
+     "role": "platform"
+    },
+    {
+     "id": 13358001823,
+     "name": "MNDF Flat",
+     "lat": 4.210707,
+     "lon": 73.539818,
+     "role": "platform"
+    }
+   ],
+   "road_ways": 52,
+   "road_ways_missing": 0,
+   "length_m": 16647
+  },
+  {
+   "id": 18072649,
+   "ref": "R10",
+   "name": "Orchid Route",
+   "from": "Dharumavantha Hospital (West Side)",
+   "to": "Dharumavantha Hospital (West Side) OPP",
+   "operator": "MTCC",
+   "network": "RTL",
+   "fee": "",
+   "stops": [
+    {
+     "id": 11936631796,
+     "name": "Dharumavantha Hospital (West Side) Bus Stop",
+     "lat": 4.172771,
+     "lon": 73.500821,
+     "role": "platform"
+    },
+    {
+     "id": 12189475753,
+     "name": "Maaveyo Maizaan",
+     "lat": 4.175911,
+     "lon": 73.505798,
+     "role": "platform"
+    },
+    {
+     "id": 12189475754,
+     "name": "Hilaaleege",
+     "lat": 4.177595,
+     "lon": 73.507226,
+     "role": "platform"
+    },
+    {
+     "id": 12189475755,
+     "name": "Justice Building",
+     "lat": 4.178446,
+     "lon": 73.50848,
+     "role": "platform"
+    },
+    {
+     "id": 12189475756,
+     "name": "Jumhoore Maidaan",
+     "lat": 4.178898,
+     "lon": 73.511009,
+     "role": "platform"
+    },
+    {
+     "id": 12189475757,
+     "name": "Jetty No.5",
+     "lat": 4.178745,
+     "lon": 73.513711,
+     "role": "platform"
+    },
+    {
+     "id": 11183603537,
+     "name": "MTCC Tower",
+     "lat": 4.178186,
+     "lon": 73.515578,
+     "role": "platform"
+    },
+    {
+     "id": 12189475758,
+     "name": "Carnival",
+     "lat": 4.176967,
+     "lon": 73.517983,
+     "role": "platform"
+    },
+    {
+     "id": 12189475759,
+     "name": "Artificial Beach",
+     "lat": 4.175064,
+     "lon": 73.517976,
+     "role": "platform"
+    },
+    {
+     "id": 12189475761,
+     "name": "Muni Ufaa",
+     "lat": 4.174424,
+     "lon": 73.516858,
+     "role": "platform"
+    },
+    {
+     "id": 12189590992,
+     "name": "Ibrahim Mosque",
+     "lat": 4.174662,
+     "lon": 73.514326,
+     "role": "platform"
+    },
+    {
+     "id": 12189590993,
+     "name": "Olympus",
+     "lat": 4.174973,
+     "lon": 73.511504,
+     "role": "platform"
+    },
+    {
+     "id": 10300135475,
+     "name": "City Square",
+     "lat": 4.175168,
+     "lon": 73.50973,
+     "role": "platform"
+    },
+    {
+     "id": 12189590994,
+     "name": "Maaveyo Magu",
+     "lat": 4.175422,
+     "lon": 73.507432,
+     "role": "platform"
+    },
+    {
+     "id": 12189590995,
+     "name": "Fini Park",
+     "lat": 4.175676,
+     "lon": 73.504988,
+     "role": "platform"
+    },
+    {
+     "id": 12189590996,
+     "name": "Social Centre",
+     "lat": 4.175965,
+     "lon": 73.502101,
+     "role": "platform"
+    },
+    {
+     "id": 11187516437,
+     "name": "Maafannu Madharusaa Bus Stop",
+     "lat": 4.176,
+     "lon": 73.502418,
+     "role": ""
+    }
+   ],
+   "road_ways": 1,
+   "road_ways_missing": 0,
+   "length_m": 45
+  },
+  {
+   "id": 17641395,
+   "ref": "R11",
+   "name": "Ameenee Route",
+   "from": "Raalhugandu Bus Stop",
+   "to": "Henveiru Stadium Bus Stop",
+   "operator": "MTCC",
+   "network": "RTL",
+   "fee": "",
+   "stops": [
+    {
+     "id": 11936631788,
+     "name": "Raalhugandu (Mini Bus)",
+     "lat": 4.173291,
+     "lon": 73.517821,
+     "role": "platform"
+    },
+    {
+     "id": 11936631789,
+     "name": "Dharubaaruge Bus Stop",
+     "lat": 4.170742,
+     "lon": 73.516292,
+     "role": "platform"
+    },
+    {
+     "id": 11936631790,
+     "name": "Kudakudhinge Bageecha Bus Stop",
+     "lat": 4.170966,
+     "lon": 73.514191,
+     "role": "platform"
+    },
+    {
+     "id": 11936631791,
+     "name": "Male' Hiya Bus Stop",
+     "lat": 4.17118,
+     "lon": 73.512259,
+     "role": "platform"
+    },
+    {
+     "id": 11936631792,
+     "name": "Rehendhi Flat Bus Stop",
+     "lat": 4.171324,
+     "lon": 73.510386,
+     "role": "platform"
+    },
+    {
+     "id": 11936631793,
+     "name": "MIRA Bus Stop",
+     "lat": 4.171609,
+     "lon": 73.508236,
+     "role": "platform"
+    },
+    {
+     "id": 11936631794,
+     "name": "Maafannu Stadium Bus Stop",
+     "lat": 4.171881,
+     "lon": 73.505608,
+     "role": "platform"
+    },
+    {
+     "id": 11936631795,
+     "name": "Ministry of Environment Bus Stop",
+     "lat": 4.172039,
+     "lon": 73.504174,
+     "role": "platform"
+    },
+    {
+     "id": 11235595337,
+     "name": "Maafannu Ferry Terminal Bus Stop",
+     "lat": 4.172273,
+     "lon": 73.502108,
+     "role": "platform"
+    },
+    {
+     "id": 11936631796,
+     "name": "Dharumavantha Hospital (West Side) Bus Stop",
+     "lat": 4.172771,
+     "lon": 73.500821,
+     "role": "platform"
+    },
+    {
+     "id": 11187516437,
+     "name": "Maafannu Madharusaa Bus Stop",
+     "lat": 4.176,
+     "lon": 73.502418,
+     "role": "platform"
+    },
+    {
+     "id": 11936631798,
+     "name": "Odeon Bus Stop",
+     "lat": 4.175573,
+     "lon": 73.506588,
+     "role": "platform"
+    },
+    {
+     "id": 11936631799,
+     "name": "Zikura Mosque Bus Stop",
+     "lat": 4.175407,
+     "lon": 73.508235,
+     "role": "platform"
+    },
+    {
+     "id": 11936631800,
+     "name": "City Square (North Side)",
+     "lat": 4.175215,
+     "lon": 73.509863,
+     "role": "platform"
+    },
+    {
+     "id": 11936631801,
+     "name": "Billoorijehige Bus Stop",
+     "lat": 4.175011,
+     "lon": 73.511553,
+     "role": "platform"
+    },
+    {
+     "id": 11936631802,
+     "name": "Heenaamaage Bus Stop",
+     "lat": 4.174821,
+     "lon": 73.513789,
+     "role": "platform"
+    },
+    {
+     "id": 11936631803,
+     "name": "Dhamanaveshi Bus Stop",
+     "lat": 4.174643,
+     "lon": 73.515277,
+     "role": "platform"
+    },
+    {
+     "id": 11936631804,
+     "name": "Henveiru Stadium Bus Stop",
+     "lat": 4.174448,
+     "lon": 73.517125,
+     "role": "platform"
+    }
+   ],
+   "road_ways": 17,
+   "road_ways_missing": 0,
+   "length_m": 4443
+  },
+  {
+   "id": 18134493,
+   "ref": "R12",
+   "name": "Sosun Route",
+   "from": "MTCC Sawmill",
+   "to": "Henveiru Stadium",
+   "operator": "Rajje Transport Link",
+   "network": "",
+   "fee": "",
+   "stops": [
+    {
+     "id": 12231601700,
+     "name": "MTCC Sawmill",
+     "lat": 4.176749,
+     "lon": 73.517854,
+     "role": "platform"
+    },
+    {
+     "id": 11182617737,
+     "name": "Minstry of Foreign Affairs",
+     "lat": 4.17848,
+     "lon": 73.514048,
+     "role": "platform"
+    },
+    {
+     "id": 12189475756,
+     "name": "Jumhoore Maidaan",
+     "lat": 4.178898,
+     "lon": 73.511009,
+     "role": "platform"
+    },
+    {
+     "id": 12231612601,
+     "name": "Velaanaage",
+     "lat": 4.178298,
+     "lon": 73.513249,
+     "role": "platform"
+    },
+    {
+     "id": 11182577639,
+     "name": "Majeedhiyya School",
+     "lat": 4.17753,
+     "lon": 73.51525,
+     "role": "platform"
+    },
+    {
+     "id": 11185404555,
+     "name": "Islamic University of Maldives",
+     "lat": 4.175956,
+     "lon": 73.514961,
+     "role": "platform"
+    },
+    {
+     "id": 11936631803,
+     "name": "Dhamanaveshi Bus Stop",
+     "lat": 4.174643,
+     "lon": 73.515277,
+     "role": "platform"
+    },
+    {
+     "id": 11936631804,
+     "name": "Henveiru Stadium Bus Stop",
+     "lat": 4.174448,
+     "lon": 73.517125,
+     "role": "platform"
+    }
+   ],
+   "road_ways": 15,
+   "road_ways_missing": 0,
+   "length_m": 2480
+  },
+  {
+   "id": 19930619,
+   "ref": "R13",
+   "name": "Villimale Internal",
+   "from": "",
+   "to": "",
+   "operator": "RTL",
+   "network": "",
+   "fee": "",
+   "stops": [
+    {
+     "id": 13359728853,
+     "name": "BML Villimale Branch",
+     "lat": 4.174494,
+     "lon": 73.485985,
+     "role": ""
+    },
+    {
+     "id": 13359728854,
+     "name": "Muhiyyiddin School",
+     "lat": 4.173228,
+     "lon": 73.485895,
+     "role": ""
+    },
+    {
+     "id": 13359728855,
+     "name": "MNDF Flats",
+     "lat": 4.1723,
+     "lon": 73.485624,
+     "role": ""
+    },
+    {
+     "id": 13359728856,
+     "name": "Sinaai Sarahadhu",
+     "lat": 4.171686,
+     "lon": 73.485148,
+     "role": ""
+    },
+    {
+     "id": 13359728857,
+     "name": "Salaam Miskiy",
+     "lat": 4.172169,
+     "lon": 73.484291,
+     "role": ""
+    },
+    {
+     "id": 13359728858,
+     "name": "Boalha Dhandu",
+     "lat": 4.173049,
+     "lon": 73.484228,
+     "role": ""
+    },
+    {
+     "id": 13359728859,
+     "name": "Vaaru Hingun",
+     "lat": 4.173533,
+     "lon": 73.483717,
+     "role": ""
+    },
+    {
+     "id": 13359728860,
+     "name": "Viludhooni Park",
+     "lat": 4.174063,
+     "lon": 73.483204,
+     "role": ""
+    },
+    {
+     "id": 13359728861,
+     "name": "Jumhooree Hingun",
+     "lat": 4.174869,
+     "lon": 73.483705,
+     "role": ""
+    },
+    {
+     "id": 13359728862,
+     "name": "Villimale Beach",
+     "lat": 4.175359,
+     "lon": 73.484158,
+     "role": ""
+    },
+    {
+     "id": 13359728865,
+     "name": "Villimale Harbour",
+     "lat": 4.176057,
+     "lon": 73.484514,
+     "role": ""
+    }
+   ],
+   "road_ways": 16,
+   "road_ways_missing": 0,
+   "length_m": 1816
+  },
+  {
+   "id": 19926694,
+   "ref": "R2",
+   "name": "Carnival to HM Phase 1",
+   "from": "Carnival",
+   "to": "Carnival",
+   "operator": "MTCC",
+   "network": "RTL",
+   "fee": "",
+   "stops": [
+    {
+     "id": 13611624408,
+     "name": "Carnival",
+     "lat": 4.17695,
+     "lon": 73.517941,
+     "role": "stop_entry_only"
+    },
+    {
+     "id": 13359662359,
+     "name": "Raalhugandu",
+     "lat": 4.173144,
+     "lon": 73.517815,
+     "role": "platform"
+    },
+    {
+     "id": 13611624403,
+     "name": "Flat No. 120",
+     "lat": 4.210846,
+     "lon": 73.541768,
+     "role": "stop"
+    },
+    {
+     "id": 13611624402,
+     "name": "Flat No. 147",
+     "lat": 4.213213,
+     "lon": 73.543726,
+     "role": "stop"
+    },
+    {
+     "id": 13611624401,
+     "name": "Centro Mall",
+     "lat": 4.216307,
+     "lon": 73.542617,
+     "role": "stop"
+    },
+    {
+     "id": 13358001824,
+     "name": "CHSE",
+     "lat": 4.221104,
+     "lon": 73.541479,
+     "role": "platform"
+    },
+    {
+     "id": 13611578599,
+     "name": "Amin Avenue",
+     "lat": 4.214304,
+     "lon": 73.540279,
+     "role": "stop"
+    },
+    {
+     "id": 13611578598,
+     "name": "MNDF Flat",
+     "lat": 4.210736,
+     "lon": 73.53972,
+     "role": "stop"
+    },
+    {
+     "id": 13611624404,
+     "name": "Hulhumalé Cemetery",
+     "lat": 4.207433,
+     "lon": 73.53994,
+     "role": "stop"
+    },
+    {
+     "id": 13611624405,
+     "name": "Senahiya",
+     "lat": 4.172354,
+     "lon": 73.516713,
+     "role": "stop"
+    },
+    {
+     "id": 13611624407,
+     "name": "Artificial Beach (West Side)",
+     "lat": 4.174163,
+     "lon": 73.517849,
+     "role": "stop"
+    },
+    {
+     "id": 13611624408,
+     "name": "Carnival",
+     "lat": 4.17695,
+     "lon": 73.517941,
+     "role": "stop_exit_only"
+    }
+   ],
+   "road_ways": 83,
+   "road_ways_missing": 0,
+   "length_m": 16983
+  }
+ ],
+ "masters": []
+}
