@@ -98,7 +98,7 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
             ui.button("Re-install for all islands") {
                 host.show { ConfirmScreen("Re-install the built-in maps of all islands? No internet needed; it takes a minute or two. Google places and your own places are kept.", "Re-install") {
                     host.backTo(this@OfflineMapsScreen)
-                    startOfflineDownload(host, g.islands.allIslands, "the whole Maldives", builtin = true) { ok -> if (ok) g.settings.builtinInstalledDate = st }
+                    startOfflineDownload(host, g.islands.allIslands, "the whole Maldives", builtin = true) { ok -> if (ok) g.settings.builtinInstalledDate = st ?: d }
                 } }
             }
         }
