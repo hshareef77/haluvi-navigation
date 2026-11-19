@@ -1,53 +1,76 @@
 #!/usr/bin/env python3
-"""Downloads OpenStreetMap places and roads for every atoll of the Maldives and saves them as
-app assets (assets/osm/<ATOLL>.json.gz), so the app has offline maps built in.
-The queries are the same as the app's own Offline maps download, so the app processes them the same way.
-Map data (c) OpenStreetMap contributors, ODbL."""
-import gzip, json, os, sys, time, urllib.parse, urllib.request
+"""Builds the app's built-in OpenStreetMap maps (assets/osm/<ATOLL>.json.gz) from the daily Maldives
+extract on Geofabrik (one file, no busy live servers). Same filters as the app's own Offline maps
+download, so the app processes the data the same way. Map data (c) OpenStreetMap contributors, ODbL."""
+import gzip, hashlib, json, os, re, sys, time, urllib.request
+import osmium
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ASSETS = os.path.join(ROOT, "app", "src", "main", "assets")
 OUT = os.path.join(ASSETS, "osm")
-SERVERS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter",
-           "https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass.private.coffee/api/interpreter"]
-
-PLACE_FILTERS = ['["amenity"]', '["shop"]', '["tourism"]', '["healthcare"]', '["leisure"]["name"]',
-                 '["office"]["name"]', '["man_made"="pier"]', '["public_transport"]', '["building"="mosque"]', '["craft"]["name"]']
-ROAD_RE = "^(primary|secondary|tertiary|unclassified|residential|living_street|service|pedestrian|footway|path|track|road|steps|cycleway)$"
-KEEP_PLACE_TAGS = None  # keep all tags of places (category and address need several)
+PBF_URL = "https://download.geofabrik.de/asia/maldives-latest.osm.pbf"
+ROAD_RE = re.compile(r"^(primary|secondary|tertiary|unclassified|residential|living_street|service|pedestrian|footway|path|track|road|steps|cycleway)$")
 KEEP_ROAD_TAGS = {"name", "name:en", "ref", "highway", "oneway"}
 
 
-def overpass(q):
-    last = None
-    for attempt in range(4):
-        for url in SERVERS:
-            try:
-                data = urllib.parse.urlencode({"data": q}).encode()
-                req = urllib.request.Request(url, data=data, headers={"User-Agent": "HaluviNavigation-builtin-maps/1.0"})
-                with urllib.request.urlopen(req, timeout=240) as r:
-                    j = json.loads(r.read().decode("utf-8"))
-                    if "elements" in j:
-                        return j["elements"]
-            except Exception as e:
-                last = e
-                print("  server failed:", url, e, flush=True)
-                time.sleep(5)
-        time.sleep(30)
-    raise RuntimeError("all servers failed: %s" % last)
+def is_place(t):
+    """The same filters as the app's Overpass query for places."""
+    return ("amenity" in t or "shop" in t or "tourism" in t or "healthcare" in t or
+            ("leisure" in t and "name" in t) or ("office" in t and "name" in t) or
+            t.get("man_made") == "pier" or "public_transport" in t or t.get("building") == "mosque" or
+            ("craft" in t and "name" in t))
+
+
+class Collector(osmium.SimpleHandler):
+    def __init__(self):
+        super().__init__()
+        self.places, self.roads = [], []
+
+    def node(self, n):
+        t = {tag.k: tag.v for tag in n.tags}
+        if t and is_place(t) and n.location.valid():
+            self.places.append({"lat": round(n.location.lat, 7), "lon": round(n.location.lon, 7), "tags": t})
+
+    def way(self, w):
+        t = {tag.k: tag.v for tag in w.tags}
+        if not t:
+            return
+        pts = [(nd.location.lat, nd.location.lon) for nd in w.nodes if nd.location.valid()]
+        if len(pts) < 2:
+            return
+        if is_place(t):
+            # Like Overpass "out center": the middle of the way's box.
+            lat = (min(p[0] for p in pts) + max(p[0] for p in pts)) / 2
+            lon = (min(p[1] for p in pts) + max(p[1] for p in pts)) / 2
+            self.places.append({"lat": round(lat, 7), "lon": round(lon, 7), "tags": t})
+        if ROAD_RE.match(t.get("highway", "")):
+            self.roads.append({"tags": {k: v for k, v in t.items() if k in KEEP_ROAD_TAGS},
+                               "geometry": [{"lat": round(a, 7), "lon": round(b, 7)} for a, b in pts]})
 
 
 def main():
+    pbf = os.path.join(ROOT, "maldives-latest.osm.pbf")
+    for attempt in range(5):
+        try:
+            urllib.request.urlretrieve(PBF_URL, pbf)
+            break
+        except Exception as e:
+            print("download failed:", e, flush=True)
+            time.sleep(30)
+    else:
+        raise SystemExit("could not download the Maldives map file")
+    print("map file", os.path.getsize(pbf), "bytes", flush=True)
+    c = Collector()
+    c.apply_file(pbf, locations=True)
+    print(len(c.places), "places,", len(c.roads), "roads in the Maldives", flush=True)
+
     atolls = json.load(open(os.path.join(ASSETS, "maldives_islands.json"), encoding="utf-8"))
     shapes = json.load(open(os.path.join(ASSETS, "island_outlines_builtin.json"), encoding="utf-8"))
     rings, island_ring = shapes["rings"], shapes["islandRing"]
     os.makedirs(OUT, exist_ok=True)
-    index = {"date": time.strftime("%Y-%m-%d"), "atolls": {}}
-    only = set(sys.argv[1:])
+    index = {"date": time.strftime("%Y-%m-%d"), "source": "Geofabrik Maldives extract", "atolls": {}}
     for a in atolls:
         code = a["code"]
-        if only and code not in only:
-            continue
         s, w, n, e = 90.0, 180.0, -90.0, -180.0
         for isl in a["islands"]:
             r = rings.get(island_ring.get(code + ":" + isl["n"], ""))
@@ -55,38 +78,18 @@ def main():
             for p in pts:
                 s, n, w, e = min(s, p[0]), max(n, p[0]), min(w, p[1]), max(e, p[1])
         pad = 0.004
-        b = "(%f,%f,%f,%f)" % (s - pad, w - pad, n + pad, e + pad)
-        print(code, a["fullname"], b, flush=True)
-        pq = "[out:json][timeout:180];(" + "".join("node%s%s;way%s%s;" % (b, f, b, f) for f in PLACE_FILTERS) + ");out center tags;"
-        places = []
-        for el in overpass(pq):
-            t = el.get("tags") or {}
-            lat = el.get("lat", (el.get("center") or {}).get("lat"))
-            lon = el.get("lon", (el.get("center") or {}).get("lon"))
-            if lat is None or lon is None or not t:
-                continue
-            places.append({"lat": round(lat, 7), "lon": round(lon, 7), "tags": t})
-        time.sleep(3)
-        rq = '[out:json][timeout:180];way%s["highway"~"%s"];out geom tags;' % (b, ROAD_RE)
-        roads = []
-        for el in overpass(rq):
-            g = el.get("geometry") or []
-            if len(g) < 2:
-                continue
-            t = {k: v for k, v in (el.get("tags") or {}).items() if k in KEEP_ROAD_TAGS}
-            roads.append({"tags": t, "geometry": [{"lat": round(p["lat"], 7), "lon": round(p["lon"], 7)} for p in g]})
-        with gzip.open(os.path.join(OUT, code + ".json.gz"), "wt", encoding="utf-8") as f:
+        s, w, n, e = s - pad, w - pad, n + pad, e + pad
+        inside = lambda lat, lon: s <= lat <= n and w <= lon <= e
+        places = [p for p in c.places if inside(p["lat"], p["lon"])]
+        roads = [r for r in c.roads if any(inside(g["lat"], g["lon"]) for g in r["geometry"])]
+        path = os.path.join(OUT, code + ".json.gz")
+        with gzip.open(path, "wt", encoding="utf-8") as f:
             json.dump({"date": index["date"], "places": places, "roads": roads}, f, separators=(",", ":"), ensure_ascii=False)
-        index["atolls"][code] = {"places": len(places), "roads": len(roads)}
-        print("  ", len(places), "places", len(roads), "roads", flush=True)
-        time.sleep(3)
-    old = {}
-    ip = os.path.join(OUT, "index.json")
-    if os.path.exists(ip) and only:
-        old = json.load(open(ip)).get("atolls", {})
-    old.update(index["atolls"])
-    index["atolls"] = old
-    json.dump(index, open(ip, "w"), indent=1)
+        sha = hashlib.sha256(open(path, "rb").read()).hexdigest()
+        index["atolls"][code] = {"places": len(places), "roads": len(roads), "bytes": os.path.getsize(path), "sha256": sha}
+        print(code, a["fullname"], len(places), "places", len(roads), "roads", os.path.getsize(path), "bytes", flush=True)
+    json.dump(index, open(os.path.join(OUT, "index.json"), "w"), indent=1)
+    os.remove(pbf)
 
 
 if __name__ == "__main__":
