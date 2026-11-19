@@ -1,0 +1,30 @@
+name: Prepare built-in OpenStreetMap maps
+on:
+  workflow_dispatch:
+    inputs:
+      atolls:
+        description: Atoll codes separated by spaces (empty = all atolls)
+        required: false
+        default: ''
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download places and roads for each atoll
+        env:
+          ATOLLS: ${{ inputs.atolls }}
+        run: python3 tools/fetch_osm.py $ATOLLS
+      - name: Save the map files in the repository
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add app/src/main/assets/osm
+          git commit -m "Built-in OpenStreetMap maps updated" || echo "No changes"
+          git push
