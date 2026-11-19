@@ -195,7 +195,9 @@ class NavigationEngine(
         instructionText = "Starting."
         NavigationService.ensureRunning(context)
         haptics.tick()
-        speaker.speak("Going to ${d.name}.")
+        val road = if (d.kind == NavKind.PLACE) (d.placeId?.let { store.byId(it) }?.let { RoadInfo.of(it) }
+            ?: RoadInfo.nearestNamed(d.lat, d.lon, null))?.takeIf { !d.name.equals(it, true) } else null
+        speaker.speak("Going to ${d.name}" + (road?.let { ", on $it" } ?: "") + ".")
         main.removeCallbacks(ticker)
         main.post(ticker)
         tick()
@@ -220,7 +222,7 @@ class NavigationEngine(
         distHistory.clear(); arrivalCount = 0
         lastDistSpoken = -1; lastDistSpeakMs = 0; lastGpsWaitSpeakMs = 0
         smoothedSpeed = null; lastSpeedDist = null; lastSpeedMs = 0; lastDistance = null
-        minDist = Double.MAX_VALUE; passedAnnounced = false; approachSpoken.clear(); lockedSide = null; lockedRank = 0
+        minDist = Double.MAX_VALUE; passedAnnounced = false; approachSpoken.clear(); lockedSide = null; lockedRank = 0; noRouteSaid = false
         awayMin = Double.MAX_VALUE; awayLastMs = 0
         pointing = false; pointStatus = ""
         haptics.stopFocus()
@@ -384,6 +386,7 @@ class NavigationEngine(
         }
     }
 
+    private var noRouteSaid = false
     private var awayMin = Double.MAX_VALUE
     private var awayLastMs = 0L
 
@@ -553,6 +556,7 @@ class NavigationEngine(
                 routeMessage = "$source: ${Phrases.distance(got.distanceMeters)}, about ${Fmt.duration(got.durationSeconds)}."
                 location.fix?.let { routeTick(it, got, smoothedSpeed, announceFirst = true, rerouted = rerouted) }
             } else {
+                if (!noRouteSaid) { noRouteSaid = true; speaker.speak("No road route here, I will guide by direction.", flush = false) }
                 routeMessage = "No road route. Using direct guidance." +
                     (googleError?.let { " " + google.describeError(it) } ?: if (!useGoogle) " Download the offline map of this island for routes without internet." else "")
             }
@@ -686,7 +690,7 @@ class NavigationEngine(
 
         // ---- spoken guidance ----
         if (announceFirst) {
-            val kind = if (r.source == "Offline") "Offline route" else "Route"
+            val kind = "Route"
             speaker.speak((if (rerouted) "New route. " else "$kind ready, ${Phrases.distance(r.distanceMeters)}. ") + instructionText)
         } else if (advanced && settings.turnAnnouncementsOn) {
             speaker.speak(instructionText)

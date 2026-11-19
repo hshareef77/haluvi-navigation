@@ -129,6 +129,7 @@ class PlaceScreen(private val id: String) : Screen() {
         val parts = arrayListOf<String>()
         if (f != null) parts.add(Phrases.distance(Geo.distance(f.lat, f.lon, loc.lat, loc.lon)) + ", " + Phrases.where(g.compass.heading, Geo.bearing(f.lat, f.lon, loc.lat, loc.lon)) + ".")
         if (loc.categoryId != "none") parts.add(loc.categoryName + ".")
+        mv.haluvi.navigation.nav.RoadInfo.of(loc)?.let { parts.add("On $it.") }
         if (loc.islandName.isNotBlank()) parts.add(loc.islandName + ".")
         parts.add("Source: ${sourceName(loc.source)}.")
         if (loc.hasAccess) parts.add("Saved with its side of the road.")

@@ -11,7 +11,10 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
   and other islands; no internet needed. Downloading the newest from the internet still works.
 - **Places** (walking or driving): From and To (swap), Travel, Start. Choose a place: Where (near me, an island,
   a category), Search in (on my phone offline, OpenStreetMap online, Google online only with a key), a search
-  box that filters as you type; tap to choose, actions menu for place options.
+  box that filters as you type (names, addresses and roads, with Dhivehi spelling variants); roads are found
+  too, with Places on this road in order with their side; each place shows its road.
+- **Airports** both ways: Islands > To > Airports by airport name and island, and as places (category Airport) at
+  the terminal, from the built-in OpenStreetMap data.
 - **Islands** (sea or air): From (GPS island or chosen), To (any of the 200 inhabited islands), Start.
   - Island stop announcements: "Approaching …", "Arrived at …" (ferry stop), "Passing …".
   - Exact with island outlines, downloaded once in the app from OpenStreetMap (continues where it stopped,

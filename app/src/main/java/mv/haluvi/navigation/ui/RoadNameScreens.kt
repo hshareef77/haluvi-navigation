@@ -45,8 +45,10 @@ class RoadNameScreen : Screen() {
             ready = s; readyMs = nowMs
             status?.text = "Road found: ${s.description}"
             if (first || speakAlways) {
-                host.speak("Road found. ${s.description} Type the name and press Save.")
-                if (s.currentName.isNotBlank() && edit?.text.isNullOrBlank()) edit?.setText(s.currentName)
+                // A name suggestion from what nearby places give as their address (for example Google places).
+                val sug = if (s.currentName.isBlank()) mv.haluvi.navigation.nav.RoadInfo.suggestName(s.points) else null
+                host.speak("Road found. ${s.description}" + (sug?.let { " Places on this road say: $it. It is filled in; press Save to use it, or type another name." } ?: " Type the name and press Save."))
+                if (edit?.text.isNullOrBlank()) edit?.setText(sug ?: s.currentName)
             }
             lastKind = "ready"
             return
@@ -72,7 +74,7 @@ class RoadNameScreen : Screen() {
         if (r == null) { host.speak("The road is not found yet. " + RoadDetector.message(RoadDetector.evaluate())); return }
         AppGraph.store.roadNames.add(r.islandKey, name, r.points)
         RoadDetector.version++
-        host.speak("Saved. This road is now called $name.")
+        host.speak("Saved. ${Phrases.distance(mv.haluvi.navigation.data.RoadNames.length(r.points))} of road are now called $name.")
         ready = null; edit?.setText("")
     }
 }
@@ -85,7 +87,8 @@ class MyRoadsScreen : Screen() {
         titleView = ui.title("My roads")
         ui.button("Check this road", color = UiColors.BUTTON_ON) { host.speak(RoadDetector.describeHere()) }
         ui.button("Record a new road") { host.show { RecordRoadScreen() } }
-        ui.button("Name this road") { host.show { RoadNameScreen() } }
+        ui.button("Name this road, by walking along it") { host.show { RoadNameScreen() } }
+        ui.button("Unnamed roads near me") { host.show { UnnamedRoadsScreen() } }
         val list = g.store.roadNames.all().sortedWith(compareBy({ g.islands.byKey(it.islandKey)?.name ?: "" }, { it.name.lowercase() }))
         ui.heading("My roads: ${list.size}")
         if (list.isEmpty()) ui.info("None yet. Name a map road, or record a road that is missing.")
@@ -176,13 +179,39 @@ class RecordRoadScreen : Screen() {
         val key = RoadDetector.islandKeyAt(pts[0][0], pts[0][1])
         if (key == null) { host.speak("Not near an island. Nothing saved."); rebuild(); return }
         val len = mv.haluvi.navigation.data.RoadNames.length(pts)
-        fun save(width: String) {
-            host.show { TextInputScreen("Road name", "Road name, or Unnamed road", "Unnamed road") { name ->
-                AppGraph.store.roadNames.addRecorded(key, name, width, pts); RoadDetector.version++
-                host.speak("Road saved, ${Phrases.distance(len)}. It is joined to roads at its ends, and used in offline routes.")
-                host.back(); host.back(); host.back()
-            } }
+        // Already on the map? Then naming that road is better than saving a double.
+        val rs = AppGraph.store.loadRoads(key).filter { !it.recorded }
+        val sample = mv.haluvi.navigation.data.RoadNames.sample(pts)
+        val covered = sample.count { p -> rs.any { r -> mv.haluvi.navigation.data.RoadNames.distanceToLine(p[0], p[1], r.points) <= 12 } }
+        if (rs.isNotEmpty() && covered >= sample.size * 0.8) {
+            val mid = pts[pts.size / 2]
+            val idx = rs.indices.minByOrNull { mv.haluvi.navigation.data.RoadNames.distanceToLine(mid[0], mid[1], rs[it].points) }!!
+            val line = RoadDetector.joined(RoadDetector.chain(idx, rs), rs)
+            val existing = rs[idx].name
+            host.speak("This road is already on the map" + (if (existing.isNotBlank()) ", called $existing" else "") + ". Name it instead?")
+            host.show {
+                ChoiceScreen("Already on the map", "The road you walked is already on the map" + (if (existing.isNotBlank()) ", called $existing." else ", without a name."), listOf(
+                    "Name the map road" to { host.show { TextInputScreen("Name this road", "Road name", mv.haluvi.navigation.nav.RoadInfo.suggestName(line) ?: existing) { name ->
+                        AppGraph.store.roadNames.add(key, name, line); RoadDetector.version++
+                        host.speak("Saved. ${Phrases.distance(mv.haluvi.navigation.data.RoadNames.length(line))} of road are now called $name."); host.back(); host.back(); host.back()
+                    } } },
+                    "Save as a new road anyway" to { askWidth(len) { w -> saveRecorded(key, w, pts, len) } }
+                ))
+            }
+            return
         }
+        askWidth(len) { w -> saveRecorded(key, w, pts, len) }
+    }
+
+    private fun saveRecorded(key: String, width: String, pts: List<DoubleArray>, len: Double) {
+        host.show { TextInputScreen("Road name", "Road name, or Unnamed road", mv.haluvi.navigation.nav.RoadInfo.suggestName(pts) ?: "Unnamed road") { name ->
+            AppGraph.store.roadNames.addRecorded(key, name, width, pts); RoadDetector.version++
+            host.speak("Road saved, ${Phrases.distance(len)}. It is joined to roads at its ends, and used in offline routes.")
+            host.backTo(this@RecordRoadScreen)
+        } }
+    }
+
+    private fun askWidth(len: Double, save: (String) -> Unit) {
         host.speak("${Phrases.distance(len)} recorded. How wide is the road?")
         host.show {
             ChoiceScreen("How wide is the road?", "${Phrases.distance(len)} recorded.", listOf(
@@ -205,6 +234,31 @@ class RenameRoadScreen(private val road: NamedRoad) : Screen() {
             AppGraph.store.roadNames.rename(road.id, name); RoadDetector.version++
             host.speak("Saved.")
             host.back(); host.back()
+        }
+        ui.button("Back") { host.back() }
+        return scroll
+    }
+}
+
+/** Unnamed roads near you, each described so you can tell which one it is, to name without walking. */
+class UnnamedRoadsScreen : Screen() {
+    override fun create(): View {
+        val g = AppGraph
+        val (scroll, ui) = UiBuilder.scrolling(host)
+        titleView = ui.title("Unnamed roads near me")
+        val f = g.location.fix
+        if (f == null) { ui.info("Waiting for GPS."); ui.button("Back") { host.back() }; return scroll }
+        val list = RoadDetector.unnamedNear(f.lat, f.lon)
+        if (list.isEmpty()) ui.info("No unnamed roads within 600 meters.")
+        else ui.info("${list.size} unnamed roads, nearest first. Walking along a road with Name this road is the surest way; here you choose by the description.")
+        list.take(30).forEach { r ->
+            val sug = mv.haluvi.navigation.nav.RoadInfo.suggestName(r.points)
+            ui.button("Unnamed road, ${r.description}" + (sug?.let { " Places on it say: $it." } ?: "")) {
+                host.show { TextInputScreen("Name this road", "Road name", sug ?: "") { name ->
+                    g.store.roadNames.add(r.islandKey, name, r.points); RoadDetector.version++
+                    host.speak("Saved. ${Phrases.distance(r.length)} of road are now called $name."); host.back(); rebuild()
+                } }
+            }
         }
         ui.button("Back") { host.back() }
         return scroll

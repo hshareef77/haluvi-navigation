@@ -101,7 +101,7 @@ object RoadDetector {
      * The whole road: the found piece plus the pieces that continue it straight on with the same name
      * (OpenStreetMap often stores one street in several pieces).
      */
-    private fun chain(start: Int, rs: List<DownloadedRoad>): List<Int> {
+    fun chain(start: Int, rs: List<DownloadedRoad>): List<Int> {
         val used = linkedSetOf(start)
         fun dir(p: List<DoubleArray>, atEnd: Boolean): Double =
             if (atEnd) Geo.bearing(p[p.size - 2][0], p[p.size - 2][1], p.last()[0], p.last()[1])
@@ -127,6 +127,19 @@ object RoadDetector {
                         if (a < bestAngle) { bestAngle = a; best = ri; bestAtEnd = !qEnd }
                     }
                 }
+                if (best < 0) {
+                    // Through a bend: when exactly one road piece continues here (no junction), it is the same road.
+                    val touching = ArrayList<Pair<Int, Boolean>>()
+                    rs.forEachIndexed { ri, r ->
+                        if (ri == cur) return@forEachIndexed
+                        val q = r.points
+                        if (Geo.distance(end[0], end[1], q.first()[0], q.first()[1]) <= 3) touching.add(ri to false)
+                        else if (Geo.distance(end[0], end[1], q.last()[0], q.last()[1]) <= 3) touching.add(ri to true)
+                        else for (i in 1 until q.size - 1) if (Geo.distance(end[0], end[1], q[i][0], q[i][1]) <= 3) { touching.add(ri to false); touching.add(ri to true); break }
+                    }
+                    val only = touching.singleOrNull()
+                    if (only != null && only.first !in used && rs[only.first].name.equals(rs[start].name, true)) { best = only.first; bestAtEnd = !only.second }
+                }
                 if (best < 0) break
                 used.add(best); cur = best; atEnd = bestAtEnd
             }
@@ -135,7 +148,7 @@ object RoadDetector {
     }
 
     /** Joins the pieces into one line (in order along the road). */
-    private fun joined(ids: List<Int>, rs: List<DownloadedRoad>): List<DoubleArray> {
+    fun joined(ids: List<Int>, rs: List<DownloadedRoad>): List<DoubleArray> {
         if (ids.size == 1) return rs[ids[0]].points
         val pieces = ids.map { rs[it].points.toMutableList() }.toMutableList()
         val line = pieces.removeAt(0)
@@ -158,6 +171,46 @@ object RoadDetector {
             }
         }
         return line
+    }
+
+    /** An unnamed road near you (the whole street), described so you can tell which one it is. */
+    class NearbyRoad(val islandKey: String, val points: List<DoubleArray>, val length: Double, val distance: Double, val description: String)
+
+    /** Unnamed roads within [radius] metres, nearest first. */
+    fun unnamedNear(lat: Double, lon: Double, radius: Double = 600.0): List<NearbyRoad> {
+        val (key, rs) = roadsAt(lat, lon) ?: return emptyList()
+        val done = HashSet<Int>()
+        val out = ArrayList<NearbyRoad>()
+        for (i in rs.indices) {
+            if (i in done || rs[i].name.isNotBlank()) continue
+            val ids = chain(i, rs); done.addAll(ids)
+            val line = joined(ids, rs)
+            val d = RoadNames.distanceToLine(lat, lon, line)
+            if (d > radius) continue
+            val len = RoadNames.length(line)
+            if (len < 15) continue
+            out.add(NearbyRoad(key, line, len, d, describe(line, rs, ids.toSet(), lat, lon, d)))
+        }
+        return out.sortedBy { it.distance }
+    }
+
+    /** "180 meters long, 40 meters away at 2 o'clock, from near Feeali Mosque to near the harbour, joins Main Road". */
+    fun describe(line: List<DoubleArray>, rs: List<DownloadedRoad>, own: Set<Int>, lat: Double, lon: Double, dist: Double): String {
+        fun near(p: DoubleArray): String? = AppGraph.store.nearest(p[0], p[1]).firstOrNull()?.takeIf { it.distance <= 40 }?.loc?.name
+        val a = line.first(); val b = line.last()
+        val joins = rs.withIndex().filter { (i, r) -> i !in own && r.name.isNotBlank() &&
+            r.points.any { q -> Geo.distance(q[0], q[1], a[0], a[1]) <= 5 || Geo.distance(q[0], q[1], b[0], b[1]) <= 5 } }
+            .map { it.value.name }.distinct().take(2)
+        var best = line[0]; var bd = Double.MAX_VALUE
+        for (p in line) { val dd = Geo.distance(lat, lon, p[0], p[1]); if (dd < bd) { bd = dd; best = p } }
+        return buildString {
+            append("${Phrases.distance(RoadNames.length(line))} long, ${Phrases.distance(dist)} away ")
+            append(Phrases.where(AppGraph.compass.heading, Geo.bearing(lat, lon, best[0], best[1])))
+            val na = near(a); val nb = near(b)
+            if (na != null || nb != null) append(", from ${na?.let { "near $it" } ?: "a road end"} to ${nb?.let { "near $it" } ?: "a road end"}")
+            if (joins.isNotEmpty()) append(", joins ${joins.joinToString(" and ")}")
+            append(".")
+        }
     }
 
     sealed class State {

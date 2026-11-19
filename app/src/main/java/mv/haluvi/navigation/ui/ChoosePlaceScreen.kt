@@ -35,6 +35,8 @@ class ChoosePlaceScreen(
     private val areaId: String? = null,
     startSource: String? = null,
     startCategory: String? = null,
+    /** Only the places on this road, in order along it with their side. */
+    private val road: mv.haluvi.navigation.nav.RoadInfo.RoadHit? = null,
     private val onPick: ((SavedLocation) -> Unit)? = null
 ) : Screen() {
     private enum class Source { PHONE, OSM, GOOGLE }
@@ -124,6 +126,7 @@ class ChoosePlaceScreen(
     private fun place(loc: SavedLocation, d: Double?, b: Double?): String {
         val parts = arrayListOf(loc.name)
         if (loc.categoryId != "none") parts.add(Categories.name(loc.categoryId))
+        if (road == null) mv.haluvi.navigation.nav.RoadInfo.of(loc)?.let { parts.add("on $it") }
         if (island == null && loc.islandName.isNotBlank() && d != null && d > 3000) parts.add(loc.islandName)
         if (d != null && b != null) parts.add(Phrases.where(AppGraph.compass.heading, b).removePrefix("at ") + ", " + Phrases.distance(d))
         return parts.joinToString(", ")
@@ -155,18 +158,50 @@ class ChoosePlaceScreen(
         }
         val f = g.location.fix
         val cat = category ?: "all"
+        val R = mv.haluvi.navigation.nav.RoadInfo
+        // Matches the name, address (road), category or island, also with Dhivehi spelling variants.
+        val q = query.lowercase()
+        val nq = if (query.length >= 3) R.norm(query) else ""
+        fun matches(l: SavedLocation) = q.isEmpty() || l.name.lowercase().contains(q) || l.address.lowercase().contains(q) ||
+            l.categoryName.lowercase().contains(q) || l.islandName.lowercase().contains(q) ||
+            (nq.isNotEmpty() && (R.norm(l.name).contains(nq) || R.norm(l.address).contains(nq)))
         val all: List<Triple<SavedLocation, Double?, Double?>> = if (f != null)
-            g.store.nearest(f.lat, f.lon, query, cat, island?.key).map { Triple(it.loc, it.distance, it.bearing) }
-        else g.store.filtered(query, cat).filter { island == null || it.islandKey == island!!.key }.map { Triple(it, null, null) }
-        val rows = all.filter { r -> origin == null || r.first.source == origin }
+            g.store.nearest(f.lat, f.lon, "", cat, island?.key).filter { matches(it.loc) }.map { Triple(it.loc, it.distance, it.bearing) }
+        else g.store.filtered("", cat).filter { (island == null || it.islandKey == island!!.key) && matches(it) }.map { Triple(it, null, null) }
+        var rows = all.filter { r -> origin == null || r.first.source == origin }
             .filter { r -> areaId == null || mv.haluvi.navigation.nav.Areas.at(r.first.islandKey, r.first.lat, r.first.lon, r.first.address)?.id == areaId }
-        status?.text = (if (rows.isEmpty()) "No places found." else "${rows.size} places, nearest first.") +
+        // Places on one road: in order along it, from the point nearest to you.
+        val sides = HashMap<String, String>()
+        if (road != null) {
+            rows = rows.filter { R.isOn(it.first, road) }.map { r -> val (along, side) = R.alongAndSide(r.first, road); sides[r.first.id] = side; r to along }
+                .sortedBy { it.second }.map { it.first }
+        }
+        // Roads whose name matches what you typed.
+        val roadHits = if (road == null && query.length >= 3 && category == null && origin == null)
+            R.search(query, f?.lat, f?.lon, island?.key) else emptyList()
+        if (roadHits.isNotEmpty()) {
+            ui.heading("Roads")
+            roadHits.forEach { h ->
+                val isl = g.islands.byKey(h.islandKey)?.name ?: g.shapes.extras.firstOrNull { it.key == h.islandKey }?.name ?: ""
+                val text = listOfNotNull(h.name, "road", isl.ifBlank { null },
+                    if (f != null && h.distance != null) Phrases.where(g.compass.heading, Geo.bearing(f.lat, f.lon, h.nearLat, h.nearLon)).removePrefix("at ") + ", " + Phrases.distance(h.distance) else null
+                ).joinToString(", ")
+                val asPlace = SavedLocation(SavedLocation.newId(), h.name, h.nearLat, h.nearLon, islandKey = h.islandKey, islandName = isl)
+                val onRoad = { host.show { ChoosePlaceScreen("Places on ${h.name}", road = h, onPick = onPick) } }
+                val pick = onPick
+                if (pick != null) ui.button(text, onLong = onRoad, longLabel = "Places on this road") { pick(asPlace) }
+                else ui.button(text) { host.show { ChoiceScreen(h.name, null, listOf("Go there" to { goToPlace(host, asPlace) }, "Places on this road" to { onRoad() })) } }
+            }
+            ui.heading("Places")
+        }
+        status?.text = (if (rows.isEmpty()) "No places found." else if (road != null) "${rows.size} places on ${road.name}, in order from the nearest point." else "${rows.size} places, nearest first.") +
             (if (f == null) " Waiting for GPS." else "") +
             (if (rows.isEmpty() && g.store.items.isEmpty()) " Install the built-in map in Settings, Manage islands and places." else "")
         rows.take(limit).forEach { (loc, d, b) ->
             val pick = onPick
-            if (pick != null) ui.button(place(loc, d, b), onLong = { host.show { PlaceScreen(loc.id) } }, longLabel = "Place options") { pick(loc) }
-            else ui.button(place(loc, d, b)) { host.show { PlaceScreen(loc.id) } }
+            val text = place(loc, d, b) + (sides[loc.id]?.let { ", $it" } ?: "")
+            if (pick != null) ui.button(text, onLong = { host.show { PlaceScreen(loc.id) } }, longLabel = "Place options") { pick(loc) }
+            else ui.button(text) { host.show { PlaceScreen(loc.id) } }
         }
         if (rows.size > limit) ui.button("More places") { limit += 40; fill() }
     }

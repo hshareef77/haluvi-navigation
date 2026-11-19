@@ -18,7 +18,7 @@ def is_place(t):
     return ("amenity" in t or "shop" in t or "tourism" in t or "healthcare" in t or
             ("leisure" in t and "name" in t) or ("office" in t and "name" in t) or
             t.get("man_made") == "pier" or "public_transport" in t or t.get("building") == "mosque" or
-            ("craft" in t and "name" in t))
+            ("craft" in t and "name" in t) or t.get("aeroway") in ("aerodrome", "terminal"))
 
 
 class Collector(osmium.SimpleHandler):

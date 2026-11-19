@@ -128,16 +128,31 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
     }
 }
 
-/** All airport islands (Velana, Gan, Hanimaadhoo, ...), nearest first. */
+/**
+ * All airports, nearest first, by the airport's name and its island ("Thimarafushi Airport, on Thimarafushi").
+ * Choosing one goes to its island (flight or boat); the airport itself is also a place (category Airport) for
+ * walking or driving to the terminal.
+ */
 class AirportsScreen(private val onPick: (Island) -> Unit) : Screen() {
     override fun create(): View {
         val g = AppGraph
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title("Airports")
         val f = g.location.fix
-        val list = g.shapes.airports().let { l -> if (f != null) l.sortedBy { mv.haluvi.navigation.core.Geo.distance(f.lat, f.lon, it.lat, it.lon) } else l.sortedBy { it.name } }
+        val airportPlaces = g.store.items.filter { it.categoryId == "airport" }
+        val all = (g.islands.allIslands + g.shapes.extras)
+        val withPlace = airportPlaces.map { it.islandKey }.toSet()
+        val list = (g.shapes.airports() + all.filter { it.key in withPlace }).distinctBy { it.key }
+            .let { l -> if (f != null) l.sortedBy { mv.haluvi.navigation.core.Geo.distance(f.lat, f.lon, it.lat, it.lon) } else l.sortedBy { it.name } }
         if (list.isEmpty()) ui.info("No airports found.")
-        list.forEach { isl -> ui.button(islandLabel(isl)) { onPick(isl) } }
+        list.forEach { isl ->
+            val place = airportPlaces.filter { it.islandKey == isl.key }
+                .sortedByDescending { p -> listOf("international", "airport", "aerodrome").count { p.name.contains(it, true) } }.firstOrNull()
+            val name = isl.airportName.ifBlank { place?.name ?: "${isl.name} airport" }
+            val dist = f?.let { ", " + mv.haluvi.navigation.nav.Phrases.distance(mv.haluvi.navigation.core.Geo.distance(it.lat, it.lon, isl.lat, isl.lon)) } ?: ""
+            ui.button("$name, on ${isl.name}$dist") { onPick(isl) }
+        }
+        ui.info("To walk or drive to an airport terminal, choose a place with category Airport.")
         ui.button("Back") { host.back() }
         return scroll
     }

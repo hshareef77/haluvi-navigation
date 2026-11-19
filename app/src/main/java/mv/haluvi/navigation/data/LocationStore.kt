@@ -21,6 +21,7 @@ object Categories {
         Category("bank", "Bank / ATM"),
         Category("police", "Police"),
         Category("hotel", "Hotel / Guest house"),
+        Category("airport", "Airport"),
         Category("other", "Other")
     )
 
@@ -35,6 +36,7 @@ object Categories {
         val t = text.lowercase()
         fun has(vararg w: String) = w.any { t.contains(it) }
         return when {
+            has("airport", "aerodrome", "airfield", "aeroway") -> "airport"
             has("mosque", "masjid", "miskiy", "place_of_worship") -> "mosque"
             has("hospital", "clinic", "health", "pharmacy", "doctor", "dental") -> "health"
             has("school", "college", "kindergarten", "university", "academy") -> "school"

@@ -135,7 +135,7 @@ class OpenStreetMap {
     }
 
     private fun tagType(t: JSONObject): String {
-        for (k in listOf("amenity", "shop", "tourism", "healthcare", "public_transport", "man_made", "leisure", "office", "building", "harbour")) {
+        for (k in listOf("aeroway", "amenity", "shop", "tourism", "healthcare", "public_transport", "man_made", "leisure", "office", "building", "harbour")) {
             val v = t.optString(k)
             if (v.isNotBlank() && v != "yes") return v.replace('_', ' ')
             if (v == "yes") return k
@@ -391,7 +391,7 @@ class OpenStreetMap {
         val b = "($south,$west,$north,$east)"
         val f = listOf(
             "[\"amenity\"]", "[\"shop\"]", "[\"tourism\"]", "[\"healthcare\"]", "[\"leisure\"][\"name\"]",
-            "[\"office\"][\"name\"]", "[\"man_made\"=\"pier\"]", "[\"public_transport\"]", "[\"building\"=\"mosque\"]", "[\"craft\"][\"name\"]"
+            "[\"office\"][\"name\"]", "[\"aeroway\"~\"^(aerodrome|terminal)$\"]", "[\"man_made\"=\"pier\"]", "[\"public_transport\"]", "[\"building\"=\"mosque\"]", "[\"craft\"][\"name\"]"
         )
         val q = "[out:json][timeout:180];(" + f.joinToString("") { "node$b$it;way$b$it;" } + ");out center tags;"
         val arr = JSONObject(overpass(q, readSeconds = 60)).optJSONArray("elements") ?: return emptyList()
@@ -428,6 +428,7 @@ class OpenStreetMap {
         val amenity = t.optString("amenity"); val shop = t.optString("shop"); val tourism = t.optString("tourism")
         return when {
             (amenity == "place_of_worship" && t.optString("religion") == "muslim") || t.optString("building") == "mosque" -> "mosque"
+            t.optString("aeroway") in setOf("aerodrome", "terminal") -> "airport"
             amenity in setOf("hospital", "clinic", "doctors", "pharmacy", "dentist") || t.has("healthcare") -> "health"
             amenity in setOf("school", "college", "kindergarten", "university") -> "school"
             shop.isNotBlank() || amenity == "marketplace" -> "shop"

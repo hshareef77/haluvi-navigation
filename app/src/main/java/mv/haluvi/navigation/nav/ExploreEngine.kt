@@ -60,6 +60,8 @@ class ExploreEngine(
     var roadText = ""; private set
     var lastSpoken = ""; private set
     var hasMapRoads = false; private set
+    /** True once the roads of your island were looked up (so "no roads" is only said when it is true). */
+    var roadsChecked = false; private set
     /** Set by AppGraph: true when the position is on the sea (island announcements take over). */
     var atSea: (Fix) -> Boolean = { false }
 
@@ -116,7 +118,7 @@ class ExploreEngine(
         if (active) return
         active = true; paused = false
         goodCount = 0; badSinceMs = 0
-        confirmedRoad = ""; candidateRoad = ""; candidateCount = 0; currentRoadIndex = -1
+        confirmedRoad = ""; candidateRoad = ""; candidateCount = 0; currentRoadIndex = -1; roadsChecked = false; roadsIslandKey = ""
         spokenPlaces.clear(); spokenJunctions.clear(); googlePlaces = emptyList(); googleLastMs = 0
         roadText = ""; lastSpoken = ""
         statusText = "Explore is on. Waiting for good GPS."
@@ -210,6 +212,7 @@ class ExploreEngine(
         roadsIslandKey = key; roadsVersion = RoadDetector.version
         roads = store.loadRoads(key)
         hasMapRoads = roads.isNotEmpty()
+        roadsChecked = true
         currentRoadIndex = -1
         spokenJunctions.clear()
         // Junctions: points shared by two or more roads (OpenStreetMap roads share a node at real intersections).

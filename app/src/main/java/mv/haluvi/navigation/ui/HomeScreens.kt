@@ -103,7 +103,6 @@ class NavigationScreen : Screen() {
         titleView = ui.title("Going to ${t.name}")
         instruction = ui.info(nav.instructionText.ifBlank { "Starting." })
         distance = ui.info(nav.distanceText.ifBlank { "Waiting for GPS." })
-        guidance = ui.info(nav.guidanceText)
         islandLine = if (t.kind == mv.haluvi.navigation.nav.NavKind.ISLAND) ui.info(g.islandWatcher.lastMessage.ifBlank { "Island stops will be announced." }) else null
         ui.row(
             "Repeat" to { host.speak(nav.repeatText()) },
@@ -120,7 +119,6 @@ class NavigationScreen : Screen() {
         if (nav.isActive != wasActive) { rebuild(); return }
         instruction?.text = nav.instructionText.ifBlank { "Starting." }
         distance?.text = nav.distanceText.ifBlank { "Waiting for GPS." }
-        guidance?.text = nav.guidanceText
         islandLine?.text = AppGraph.islandWatcher.lastMessage.ifBlank { "Island stops will be announced." }
     }
 }
@@ -143,7 +141,7 @@ class DetailsScreen : Screen() {
 
     private fun lines(): List<String> {
         val nav = AppGraph.nav
-        return listOf(nav.directionText, nav.speedText, nav.altitudeText, nav.gpsText, nav.routeMessage).map { it.ifBlank { " " } }
+        return listOf(nav.guidanceText, nav.directionText, nav.speedText, nav.altitudeText, nav.gpsText, nav.routeMessage).map { it.ifBlank { " " } }
     }
 
     override fun onLive() { lines().forEachIndexed { i, s -> views.getOrNull(i)?.text = s } }
@@ -170,15 +168,24 @@ class ExploreScreen : Screen() {
             status = null; road = null; last = null
             ui.info("Speaks your road, intersections and places as you pass them.")
         }
-        if (!ex.hasMapRoads && ex.active) ui.info("No roads on this island yet, so intersections are not announced.")
+        roadsNote = ui.info(roadsNoteText())
         ui.button("What's around me") { host.show { AroundMeScreen() } }
         ui.button("My roads") { host.show { MyRoadsScreen() } }
         ui.button("Back") { host.back() }
         return scroll
     }
 
+    private var roadsNote: TextView? = null
+
+    /** Shown only while the island you are on really has no roads. */
+    private fun roadsNoteText(): String {
+        val ex = AppGraph.explore
+        return if (ex.active && ex.roadsChecked && !ex.hasMapRoads) "No roads on this island yet, so intersections are not announced." else ""
+    }
+
     override fun onLive() {
         val ex = AppGraph.explore
+        roadsNote?.let { v -> val t = roadsNoteText(); v.text = t; v.visibility = if (t.isEmpty()) View.GONE else View.VISIBLE }
         if ((status == null) == ex.active) { rebuild(); return }
         status?.text = ex.statusText
         road?.text = ex.roadText.ifBlank { "Road: not known yet." }

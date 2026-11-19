@@ -168,6 +168,8 @@ object OfflineMaps {
             }
         } finally {
             running = false
+            // Explore, Check this road and routes reload the roads at once.
+            RoadDetector.version++
         }
         val detail = if (islands.size == 1 && done == 1) {
             val isl = islands[0]

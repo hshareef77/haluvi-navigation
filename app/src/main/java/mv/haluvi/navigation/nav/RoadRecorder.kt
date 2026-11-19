@@ -2,6 +2,7 @@ package mv.haluvi.navigation.nav
 
 import mv.haluvi.navigation.AppGraph
 import mv.haluvi.navigation.core.Geo
+import mv.haluvi.navigation.data.RoadNames
 import mv.haluvi.navigation.sensors.Fix
 
 /**
@@ -13,11 +14,15 @@ object RoadRecorder {
     private val raw = ArrayList<DoubleArray>()
     var meters = 0.0; private set
     var weakGps = false; private set
+    private var nextSpokenMeters = 25.0
+    private var weakSaidMs = 0L
+    private val reachedSaid = HashSet<String>()
     private val listener: (Fix) -> Unit = { f -> runCatching { onFix(f) } }
 
     fun start() {
         if (active) return
         active = true; raw.clear(); meters = 0.0; weakGps = false
+        nextSpokenMeters = 25.0; weakSaidMs = 0L; reachedSaid.clear()
         AppGraph.location.addListener(listener)
         AppGraph.location.acquire()
         NavigationService.ensureRunning(AppGraph.appContext)
@@ -54,8 +59,15 @@ object RoadRecorder {
         NavigationService.updateOrStop(AppGraph.appContext)
     }
 
+    private fun say(text: String) = AppGraph.speaker.speak(text, flush = false)
+
     private fun onFix(f: Fix) {
-        if (f.accuracy > 15) { weakGps = true; return }
+        val nowMs = android.os.SystemClock.elapsedRealtime()
+        if (f.accuracy > 15) {
+            weakGps = true
+            if (nowMs - weakSaidMs > 20_000) { weakSaidMs = nowMs; say("GPS weak, keep walking slowly.") }
+            return
+        }
         weakGps = false
         val last = raw.lastOrNull()
         if (last == null) { raw.add(doubleArrayOf(f.lat, f.lon)); return }
@@ -63,5 +75,17 @@ object RoadRecorder {
         if (d < 3) return
         if (d > 60) return // a GPS jump
         raw.add(doubleArrayOf(f.lat, f.lon)); meters += d
+        if (meters >= nextSpokenMeters) { say("${nextSpokenMeters.toInt()} meters recorded."); nextSpokenMeters += 25.0 }
+        // Reached another road (after 20 m): the natural place to finish.
+        if (meters >= 20) {
+            val start = raw.first()
+            RoadDetector.roadsAt(f.lat, f.lon)?.second?.forEach { r ->
+                val n = r.name.ifBlank { return@forEach }
+                if (n in reachedSaid) return@forEach
+                if (RoadNames.distanceToLine(f.lat, f.lon, r.points) <= 8 && RoadNames.distanceToLine(start[0], start[1], r.points) > 20) {
+                    reachedSaid.add(n); say("You reached $n. Finish here?")
+                }
+            }
+        }
     }
 }
