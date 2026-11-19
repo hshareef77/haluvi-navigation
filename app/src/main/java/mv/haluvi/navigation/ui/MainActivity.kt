@@ -141,7 +141,8 @@ class MainActivity : Activity() {
     /** Clears the stack and shows the Home screen. */
     /** Installs the built-in maps of all islands when this app version has newer ones (no internet needed). */
     fun installBuiltinMapsIfNew(quiet: Boolean = true) {
-        val date = mv.haluvi.navigation.nav.BuiltinMaps.date() ?: return
+        runCatching { mv.haluvi.navigation.nav.BuiltinMaps.loadBusRoutesIfNew() }
+        val date = mv.haluvi.navigation.nav.BuiltinMaps.stamp() ?: return
         if (AppGraph.settings.builtinInstalledDate == date || OfflineDownload.active) return
         startOfflineDownload(this, AppGraph.islands.allIslands, "the whole Maldives", builtin = true, quiet = quiet) { ok ->
             if (ok) AppGraph.settings.builtinInstalledDate = date

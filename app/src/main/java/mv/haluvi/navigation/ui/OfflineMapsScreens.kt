@@ -91,13 +91,14 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
 
         mv.haluvi.navigation.nav.BuiltinMaps.date()?.let { d ->
             ui.heading("Built-in maps: installed automatically")
-            ui.info(if (g.settings.builtinInstalledDate == d) "OpenStreetMap roads and places from $d are installed for all islands, also resorts and airports. No internet needed."
+            val st = mv.haluvi.navigation.nav.BuiltinMaps.stamp()
+            ui.info(if (g.settings.builtinInstalledDate == st) "OpenStreetMap roads and places from $d are installed for all islands, also resorts and airports. No internet needed."
                 else "OpenStreetMap roads and places from $d are built into the app. They are installed automatically when the app starts.")
             ui.button("Re-install for an atoll or island") { host.show { AtollsScreen() } }
             ui.button("Re-install for all islands") {
                 host.show { ConfirmScreen("Re-install the built-in maps of all islands? No internet needed; it takes a minute or two. Google places and your own places are kept.", "Re-install") {
                     host.backTo(this@OfflineMapsScreen)
-                    startOfflineDownload(host, g.islands.allIslands, "the whole Maldives", builtin = true) { ok -> if (ok) g.settings.builtinInstalledDate = d }
+                    startOfflineDownload(host, g.islands.allIslands, "the whole Maldives", builtin = true) { ok -> if (ok) g.settings.builtinInstalledDate = st }
                 } }
             }
         }

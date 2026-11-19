@@ -68,7 +68,7 @@ class GuideScreen : Screen() {
         val mine = OfflineMaps.myIsland()
         if (BuiltinMaps.date() != null) {
             if (OfflineDownload.active) return "Preparing the maps of all islands. One moment, no internet needed."
-            if (g.settings.builtinInstalledDate == BuiltinMaps.date())
+            if (g.settings.builtinInstalledDate == BuiltinMaps.stamp())
                 return "The maps of all islands are ready" + (mine?.let { ", also for ${it.fullName}" } ?: "") + ". They work without internet."
             return "Preparing the maps of all islands."
         }

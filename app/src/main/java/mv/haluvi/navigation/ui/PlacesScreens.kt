@@ -40,6 +40,7 @@ fun importBackup(host: MainActivity) {
                     val places = AppGraph.store.import(text)
                     val root = runCatching { org.json.JSONObject(text.trim()) }.getOrNull()
                     val routes = runCatching { root?.optJSONArray("routes")?.let { AppGraph.routes.import(it) } }.getOrNull()
+                    runCatching { root?.optJSONArray("busRoutes")?.let { importedExtras += AppGraph.busRoutes.import(it) } }
                     // Borders, areas and island changes, then the places on joined islands are re-checked.
                     var extra = 0
                     runCatching { root?.optJSONObject("islandChanges")?.let { extra += mv.haluvi.navigation.data.IslandOverrides.importJson(it, AppGraph.islands.allIslands + AppGraph.shapes.extras) } }
@@ -55,7 +56,7 @@ fun importBackup(host: MainActivity) {
                         }
                     }
                     if (extra > 0) runCatching { mv.haluvi.navigation.nav.JoinedIslands.recheckAll() }
-                    Triple(places, AppGraph.store.lastImportedRoadNames, routes).also { importedExtras = extra }
+                    Triple(places, AppGraph.store.lastImportedRoadNames, routes).also { importedExtras += extra }
                 }
             }
             result.onSuccess { (places, roads, routes) ->
@@ -65,7 +66,7 @@ fun importBackup(host: MainActivity) {
                     (if (roads > 0) " $roads road names imported." else "") +
                     (routes?.let { (ra, rs) -> (if (ra > 0) " $ra routes imported." else "") + (if (rs > 0) " $rs routes already saved." else "") } ?: "") +
                     (if (importedRoadIslands > 0) " Roads of $importedRoadIslands islands added." else "") +
-                    (if (importedExtras > 0) " Borders, areas and island changes restored." else ""))
+                    (if (importedExtras > 0) " Bus routes, borders, areas and island changes restored." else ""))
                 host.rebuild()
             }.onFailure { host.speak("This file could not be imported.") }
         }
@@ -103,6 +104,7 @@ fun exportBackup(host: MainActivity, share: List<Island>? = null, label: String 
                     for (k in keys) g.store.roadsJson(k)?.takeIf { it.length() > 0 }?.let { roads.put(k, it); roadIslands++ }
                     root.put("osmRoads", roads)
                     root.put("routes", g.routes.exportJson())
+                        .put("busRoutes", g.busRoutes.exportJson())
                         .put("borders", mv.haluvi.navigation.nav.JoinedIslands.exportJson())
                         .put("areas", mv.haluvi.navigation.nav.Areas.exportJson())
                         .put("islandChanges", mv.haluvi.navigation.data.IslandOverrides.exportJson())
@@ -135,6 +137,8 @@ class PlaceScreen(private val id: String) : Screen() {
         if (loc.hasAccess) parts.add("Saved with its side of the road.")
         ui.info(parts.joinToString(" "))
         ui.button("Go there", color = UiColors.BUTTON_ON) { goToPlace(host, loc) }
+        val buses = g.busRoutes.near(loc.lat, loc.lon, 500.0)
+        if (buses.isNotEmpty()) ui.button("Which bus goes here? ${buses.size} routes") { host.show { BusesToPlaceScreen(loc.name, loc.lat, loc.lon) } }
         ui.button("Edit") { host.show { EditPlaceScreen(id) } }
         ui.button("Move to another island") {
             fun move(isl: Island) { mv.haluvi.navigation.nav.JoinedIslands.moveTo(loc, isl); host.speak("${loc.name} is now on ${isl.name}."); host.backTo(this@PlaceScreen) }

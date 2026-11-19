@@ -18,6 +18,7 @@ object Categories {
         Category("health", "Health"),
         Category("school", "School"),
         Category("ferry", "Ferry / Harbor"),
+        Category("bus", "Bus stop"),
         Category("bank", "Bank / ATM"),
         Category("police", "Police"),
         Category("hotel", "Hotel / Guest house"),
@@ -42,6 +43,7 @@ object Categories {
             has("school", "college", "kindergarten", "university", "academy") -> "school"
             has("shop", "store", "market", "supermarket", "grocery", "mart") -> "shop"
             has("restaurant", "cafe", "café", "coffee", "food", "bakery", "fast_food") -> "food"
+            has("bus stop", "bus station", "bus terminal") -> "bus"
             has("ferry", "harbor", "harbour", "jetty", "pier", "terminal", "port") -> "ferry"
             has("bank", "atm") -> "bank"
             has("police") -> "police"

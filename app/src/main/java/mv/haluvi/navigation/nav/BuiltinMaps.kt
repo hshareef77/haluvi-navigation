@@ -24,6 +24,24 @@ object BuiltinMaps {
     /** Date the built-in maps were prepared, or null when the app has none. */
     fun date(): String? = index()?.optString("date")?.ifBlank { null }
 
+    /**
+     * Changes each time the built-in maps are prepared again (also on the same date), so phones re-install them.
+     * Older map files have no stamp: their date is used.
+     */
+    fun stamp(): String? = index()?.let { it.optString("stamp").ifBlank { it.optString("date") } }?.ifBlank { null }
+
+    /** Bus routes of the built-in maps (OpenStreetMap route relations with their stops in order), or null. */
+    fun busRoutesJson(): JSONObject? = runCatching {
+        JSONObject(AppGraph.appContext.assets.open("osm/bus_routes.json").bufferedReader(Charsets.UTF_8).use { it.readText() })
+    }.getOrNull()
+
+    /** Takes the bus routes of these built-in maps when they are new (your own changes are kept). */
+    fun loadBusRoutesIfNew() {
+        val st = stamp() ?: return
+        if (AppGraph.busRoutes.mapStamp == st) return
+        busRoutesJson()?.let { AppGraph.busRoutes.loadBuiltin(it, st) }
+    }
+
     fun has(atollCode: String): Boolean = index()?.optJSONObject("atolls")?.has(atollCode) == true
 
     /** The last problem reading a built-in map (shown when installing fails). */

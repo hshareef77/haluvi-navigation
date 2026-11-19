@@ -41,6 +41,13 @@ class RouteTrip(private val context: Context) {
     val active: Boolean get() = route != null
     val activeRouteName: String? get() = route?.name
 
+    /** Bus rides announce every stop; other routes follow the Route settings. */
+    private var announceOverride: Boolean? = null
+    private val announceAll: Boolean get() = announceOverride ?: AppGraph.settings.routeAnnounceAll
+    /** For bus rides: the bus route and the stop where you got on. */
+    val busRouteId: String? get() = route?.id?.takeIf { it.startsWith("bus:") }?.split(":")?.getOrNull(1)
+    val busOnIndex: Int get() = route?.id?.takeIf { it.startsWith("bus:") }?.split(":")?.getOrNull(2)?.toIntOrNull() ?: 0
+
     private var approached = false
     private var minD = Double.MAX_VALUE
     private var away = 0
@@ -58,8 +65,9 @@ class RouteTrip(private val context: Context) {
     val stopsLeft: Int get() = (targetIndex - nextIndex + 1).coerceAtLeast(0)
 
     /** Starts travelling on [r], getting off at stop [target]. */
-    fun start(r: TripRoute, target: Int) {
+    fun start(r: TripRoute, target: Int, announceAll: Boolean? = null) {
         stop(silent = true)
+        announceOverride = announceAll
         if (r.stops.isEmpty()) return
         route = r
         targetIndex = target.coerceIn(0, r.stops.size - 1)
@@ -145,14 +153,14 @@ class RouteTrip(private val context: Context) {
             if (isTarget) {
                 say("Your stop is coming: ${s.name}." + if (s.isIsland) "" else " Press the bell.")
                 AppGraph.haptics.tick()
-            } else if (settings.routeAnnounceAll) say("Approaching ${s.name}.", alert = false)
+            } else if (announceAll) say("Approaching ${s.name}.", alert = false)
         }
 
         // Stopped at the stop.
         if (d <= lim.at && speed < lim.slow) slowCount++ else if (d > lim.at) slowCount = 0
         if (slowCount >= 2) {
             if (isTarget) { arrive(s); return }
-            if (settings.routeAnnounceAll) say("Stopping at ${s.name}.")
+            if (announceAll) say("Stopping at ${s.name}.")
             advance(); return
         }
         // Your stop reached without stopping (very close): still arrived.
@@ -164,7 +172,7 @@ class RouteTrip(private val context: Context) {
                 say("You passed your stop, ${s.name}. Tell the driver.")
                 stop(silent = true); return
             }
-            if (settings.routeAnnounceAll) say("Passed ${s.name}.", alert = false)
+            if (announceAll) say("Passed ${s.name}.", alert = false)
             advance(); return
         }
 
@@ -173,7 +181,7 @@ class RouteTrip(private val context: Context) {
             val n = r.stops[nextIndex + 1]
             val d2 = stopDistance(n, f.lat, f.lon)
             if (d > lim.approach && d2 + limits(n).at < d && d2 <= limits(n).approach) {
-                if (settings.routeAnnounceAll) say("Passed ${s.name}.", alert = false)
+                if (announceAll) say("Passed ${s.name}.", alert = false)
                 advance(); return
             }
         }
@@ -196,7 +204,7 @@ class RouteTrip(private val context: Context) {
         resetStop()
         val n = r.stops.getOrNull(nextIndex) ?: run { stop(silent = true); return }
         if (nextIndex == targetIndex) say("Your stop is next: ${n.name}. Get ready.")
-        else if (AppGraph.settings.routeAnnounceAll) say("Next stop: ${n.name}.", alert = false)
+        else if (announceAll) say("Next stop: ${n.name}.", alert = false)
         changed()
     }
 
@@ -214,7 +222,10 @@ class RouteTrip(private val context: Context) {
 class RouteRecorder(private val context: Context) {
     var active = false; private set
     var name = ""
+    /** Recording a bus route: bus stops on the map that you pass are added by themselves. */
+    var busMode = false; private set
     val stops = ArrayList<RouteStop>()
+    private var busCheckMs = 0L
     /** A stop the vehicle is standing at now, waiting for the user to save or skip. */
     var candidate: Fix? = null; private set
     var status = ""; private set
@@ -229,15 +240,16 @@ class RouteRecorder(private val context: Context) {
     fun removeListener(l: () -> Unit) { listeners.remove(l) }
     private fun changed() { listeners.forEach { runCatching { it() } } }
 
-    fun start(routeName: String) {
+    fun start(routeName: String, bus: Boolean = false) {
         if (active) return
-        active = true; name = routeName; stops.clear(); candidate = null
+        active = true; name = routeName; stops.clear(); candidate = null; busMode = bus
         moved = false; slowSinceMs = 0; lastStopLat = Double.NaN; lastStopLon = Double.NaN
         status = "Recording. Stops are offered when the vehicle stops."
         AppGraph.location.addListener(fixListener)
         AppGraph.location.acquire()
         NavigationService.ensureRunning(context)
-        AppGraph.speaker.speak("Recording route $routeName. When the vehicle stops, I will ask to save the stop.")
+        AppGraph.speaker.speak(if (bus) "Recording bus route $routeName. Bus stops you pass are added by themselves."
+            else "Recording route $routeName. When the vehicle stops, I will ask to save the stop.")
         changed()
     }
 
@@ -250,6 +262,19 @@ class RouteRecorder(private val context: Context) {
         changed()
         if (stops.isEmpty()) return null
         return TripRoute(TripRoute.newId(), name, stops.toMutableList())
+    }
+
+    /** Bus mode: a bus stop of the map within 25 m that is not the last stop saved is added. */
+    private fun busStopPassed(f: Fix) {
+        val nowMs = SystemClock.elapsedRealtime()
+        if (nowMs - busCheckMs < 2000) return
+        busCheckMs = nowMs
+        val hit = AppGraph.store.nearest(f.lat, f.lon, category = "bus").firstOrNull()?.takeIf { it.distance <= 25 } ?: return
+        val loc = hit.loc
+        val last = stops.lastOrNull()
+        if (last != null && (last.name == loc.name || Geo.distance(last.lat, last.lon, loc.lat, loc.lon) < 40)) return
+        addStop(RouteStop(loc.name, loc.lat, loc.lon, RouteStop.KIND_PLACE))
+        AppGraph.speaker.speak("Bus stop added: ${loc.name}.", flush = false)
     }
 
     fun skip() { candidate = null; status = "Skipped."; changed() }
@@ -265,6 +290,7 @@ class RouteRecorder(private val context: Context) {
 
     private fun onFix(f: Fix) {
         if (f.accuracy > 40) return
+        if (busMode) busStopPassed(f)
         val speed = f.speedMps ?: 0.0
         val fromLast = if (lastStopLat.isNaN()) Double.MAX_VALUE else Geo.distance(lastStopLat, lastStopLon, f.lat, f.lon)
         if (speed >= 3.0 && fromLast >= 150) { moved = true; slowSinceMs = 0; if (candidate != null) { candidate = null; changed() } }

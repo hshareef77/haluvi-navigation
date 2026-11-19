@@ -17,7 +17,7 @@ def is_place(t):
     """The same filters as the app's Overpass query for places."""
     return ("amenity" in t or "shop" in t or "tourism" in t or "healthcare" in t or
             ("leisure" in t and "name" in t) or ("office" in t and "name" in t) or
-            t.get("man_made") == "pier" or "public_transport" in t or t.get("building") == "mosque" or
+            t.get("man_made") == "pier" or "public_transport" in t or t.get("highway") == "bus_stop" or t.get("building") == "mosque" or
             ("craft" in t and "name" in t) or t.get("aeroway") in ("aerodrome", "terminal"))
 
 
@@ -94,6 +94,21 @@ def main():
         sha = hashlib.sha256(open(path, "rb").read()).hexdigest()
         index["atolls"][code] = {"places": len(places), "roads": len(roads), "bytes": os.path.getsize(path), "sha256": sha}
         print(code, a["fullname"], len(places), "places", len(roads), "roads", os.path.getsize(path), "bytes", flush=True)
+    # Bus routes (OpenStreetMap route relations) with their stops in order.
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import bus_routes
+        routes = bus_routes.collect(pbf)
+        for r in routes:
+            for k in ("raw_stop_points", "road_ways", "road_ways_missing"): r.pop(k, None)
+        json.dump({"date": index["date"], "routes": routes}, open(os.path.join(OUT, "bus_routes.json"), "w", encoding="utf-8"),
+                  separators=(",", ":"), ensure_ascii=False)
+        index["busRoutes"] = len(routes)
+        print(len(routes), "bus routes", flush=True)
+    except Exception as ex:
+        print("bus routes failed:", ex, flush=True)
+    # Changes whenever the maps are prepared again, so phones re-install even on the same date.
+    index["stamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     json.dump(index, open(os.path.join(OUT, "index.json"), "w"), indent=1)
     os.remove(pbf)
 

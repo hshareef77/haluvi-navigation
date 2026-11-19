@@ -37,6 +37,7 @@ class RoutesScreen : Screen() {
         PlacePick.handler = null
         g.routeTrip.route?.let { r -> ui.button("Travelling: ${r.name}. Open", color = UiColors.BUTTON_ON) { host.show { RouteTripScreen() } } }
         if (g.routeRecorder.active) ui.button("Recording: ${g.routeRecorder.name}. Open", color = UiColors.BUTTON_ON) { host.show { RecordRouteScreen() } }
+        ui.button("Bus routes: ${g.busRoutes.all().size}", color = UiColors.BUTTON_ON) { host.show { BusRoutesScreen() } }
         ui.info("A route is a bus line or ferry route with its stops in order. Stops can be places or islands. While you travel, stops are announced, and your own stop is warned before it comes.")
         val list = g.routes.all().sortedBy { it.name.lowercase() }
         if (list.isNotEmpty()) ui.heading("My routes")
@@ -191,6 +192,32 @@ class RouteTripScreen : Screen() {
         last = ui.info(if (trip.lastMessage.isBlank()) "Last: nothing yet." else "Last: ${trip.lastMessage}")
         ui.button("Repeat") { host.speak(trip.repeatText()) }
         ui.button("Where am I") { whereAmI(host) }
+        val bus = trip.busRouteId?.let { AppGraph.busRoutes.byId(it) }
+        if (bus != null) {
+            // Fixing the bus route on a ride: saved for your next rides.
+            ui.button("A stop is missing here: add it") {
+                val f = AppGraph.location.fix
+                if (f == null || f.accuracy > 40) { host.speak("GPS is not accurate enough. Try again in a moment."); return@button }
+                val near = AppGraph.store.nearest(f.lat, f.lon, category = "bus").firstOrNull()?.takeIf { it.distance <= 40 }?.loc
+                val at = (trip.busOnIndex + trip.nextIndex).coerceIn(0, bus.stops.size)
+                fun add(n: String, lat: Double, lon: Double) {
+                    bus.stops.add(at, mv.haluvi.navigation.data.BusStop(n, lat, lon)); AppGraph.busRoutes.changed(bus)
+                    host.speak("Added $n to ${bus.title}. It is used from your next ride.")
+                }
+                if (near != null) add(near.name, near.lat, near.lon)
+                else host.show { TextInputScreen("Stop name", "Stop name", "") { n -> add(n, f.lat, f.lon); host.back() } }
+            }
+            trip.nextStop?.let { ns ->
+                ui.button("The next stop, ${ns.name}, is wrong: remove it") {
+                    host.show { ConfirmScreen("Remove ${ns.name} from ${bus.title}? It is used from your next ride.", "Remove") {
+                        val at = trip.busOnIndex + trip.nextIndex
+                        if (bus.stops.getOrNull(at)?.name == ns.name) { bus.stops.removeAt(at); AppGraph.busRoutes.changed(bus); host.speak("Removed.") }
+                        else host.speak("This route was changed. Remove the stop in Bus routes.")
+                        host.back()
+                    } }
+                }
+            }
+        }
         ui.button("Stop route", color = UiColors.BUTTON_STOP) { trip.stop(); rebuild() }
         ui.button("Back") { host.back() }
         return scroll
@@ -214,6 +241,7 @@ class RecordRouteScreen : Screen() {
         val rec = g.routeRecorder
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title("Recording: ${rec.name}")
+        if (rec.busMode) ui.info("Bus stops on the map are added by themselves as you pass them. When the bus stops somewhere else, you can save that stop too.")
         status = ui.info(rec.status)
         val c = rec.candidate
         hadCandidate = c != null
@@ -240,9 +268,14 @@ class RecordRouteScreen : Screen() {
             rec.stops.forEachIndexed { i, s -> ui.info(stopLabel(i, s)) }
         }
         ui.button("Finish and save route", color = UiColors.BUTTON_ON) {
+            val bus = rec.busMode
             val r = rec.finish()
-            if (r == null) host.speak("No stops saved. Nothing to keep.")
-            else { g.routes.add(r); host.speak("Route ${r.name} saved with ${r.stops.size} stops.") }
+            if (r == null || (bus && r.stops.size < 2)) host.speak("Not enough stops saved. Nothing to keep.")
+            else if (bus) {
+                g.busRoutes.add(mv.haluvi.navigation.data.BusRoute(mv.haluvi.navigation.data.BusRoute.newId(), "", r.name, r.stops.first().name,
+                    r.stops.last().name, "", r.stops.map { mv.haluvi.navigation.data.BusStop(it.name, it.lat, it.lon) }.toMutableList()))
+                host.speak("Bus route ${r.name} saved with ${r.stops.size} stops.")
+            } else { g.routes.add(r); host.speak("Route ${r.name} saved with ${r.stops.size} stops.") }
             host.back()
         }
         ui.button("Cancel recording", color = UiColors.BUTTON_STOP) {

@@ -38,6 +38,7 @@ object AppGraph {
     lateinit var explore: ExploreEngine; private set
     lateinit var islandWatcher: IslandWatcher; private set
     lateinit var routes: mv.haluvi.navigation.data.TripRoutes; private set
+    lateinit var busRoutes: mv.haluvi.navigation.data.BusRoutes; private set
     lateinit var routeTrip: mv.haluvi.navigation.nav.RouteTrip; private set
     lateinit var routeRecorder: mv.haluvi.navigation.nav.RouteRecorder; private set
 
@@ -64,6 +65,7 @@ object AppGraph {
         islandWatcher = IslandWatcher(app, settings, shapes, location, speaker, haptics, nav) { explore.active }
         explore.atSea = { f -> islandWatcher.atSea(f) }
         routes = mv.haluvi.navigation.data.TripRoutes(java.io.File(app.filesDir, "routes.json"))
+        busRoutes = mv.haluvi.navigation.data.BusRoutes(java.io.File(app.filesDir, "bus_routes.json"))
         routeTrip = mv.haluvi.navigation.nav.RouteTrip(app)
         routeRecorder = mv.haluvi.navigation.nav.RouteRecorder(app)
         location.addListener { f -> mv.haluvi.navigation.nav.RoadDetector.onFix(f) }

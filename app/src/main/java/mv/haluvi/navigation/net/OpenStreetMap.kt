@@ -134,7 +134,13 @@ class OpenStreetMap {
         return out
     }
 
+    private fun isBusStop(t: JSONObject): Boolean =
+        t.optString("highway") == "bus_stop" || t.optString("amenity") == "bus_station" ||
+            (t.has("public_transport") && (t.optString("bus") == "yes" || t.optString("amenity") == "bus_station"))
+
     private fun tagType(t: JSONObject): String {
+        if (t.optString("amenity") == "bus_station") return "bus station"
+        if (isBusStop(t)) return "bus stop"
         for (k in listOf("aeroway", "amenity", "shop", "tourism", "healthcare", "public_transport", "man_made", "leisure", "office", "building", "harbour")) {
             val v = t.optString(k)
             if (v.isNotBlank() && v != "yes") return v.replace('_', ' ')
@@ -391,7 +397,7 @@ class OpenStreetMap {
         val b = "($south,$west,$north,$east)"
         val f = listOf(
             "[\"amenity\"]", "[\"shop\"]", "[\"tourism\"]", "[\"healthcare\"]", "[\"leisure\"][\"name\"]",
-            "[\"office\"][\"name\"]", "[\"aeroway\"~\"^(aerodrome|terminal)$\"]", "[\"man_made\"=\"pier\"]", "[\"public_transport\"]", "[\"building\"=\"mosque\"]", "[\"craft\"][\"name\"]"
+            "[\"office\"][\"name\"]", "[\"aeroway\"~\"^(aerodrome|terminal)$\"]", "[\"man_made\"=\"pier\"]", "[\"public_transport\"]", "[\"highway\"=\"bus_stop\"]", "[\"building\"=\"mosque\"]", "[\"craft\"][\"name\"]"
         )
         val q = "[out:json][timeout:180];(" + f.joinToString("") { "node$b$it;way$b$it;" } + ");out center tags;"
         val arr = JSONObject(overpass(q, readSeconds = 60)).optJSONArray("elements") ?: return emptyList()
@@ -416,8 +422,13 @@ class OpenStreetMap {
                 else continue
             }
             if (type == "parking" || type == "waste basket" || type == "bench" && t.optString("name").isBlank()) continue
-            val addr = listOf("addr:housename", "addr:street", "addr:suburb", "addr:place", "addr:city", "addr:island", "is_in")
+            var addr = listOf("addr:housename", "addr:street", "addr:suburb", "addr:place", "addr:city", "addr:island", "is_in")
                 .map { t.optString(it) }.filter { it.isNotBlank() }.distinct().joinToString(", ")
+            if (cat == "bus") {
+                // Bus stop details, read with the place: "with shelter and bench".
+                val have = listOfNotNull("shelter".takeIf { t.optString("shelter") == "yes" }, "bench".takeIf { t.optString("bench") == "yes" })
+                if (have.isNotEmpty()) addr = listOf(addr, "with " + have.joinToString(" and ")).filter { it.isNotBlank() }.joinToString(", ")
+            }
             val key = name.lowercase() + String.format(java.util.Locale.US, "%.5f%.5f", lat, lon)
             if (seen.add(key)) out.add(MapPlace(name, lat, lon, cat, type, addr))
         }
@@ -433,6 +444,7 @@ class OpenStreetMap {
             amenity in setOf("school", "college", "kindergarten", "university") -> "school"
             shop.isNotBlank() || amenity == "marketplace" -> "shop"
             amenity in setOf("restaurant", "cafe", "fast_food", "food_court") -> "food"
+            isBusStop(t) -> "bus"
             amenity == "ferry_terminal" || t.optString("man_made") == "pier" || t.has("harbour") || t.has("public_transport") -> "ferry"
             amenity in setOf("bank", "atm", "bureau_de_change") -> "bank"
             amenity == "police" -> "police"
