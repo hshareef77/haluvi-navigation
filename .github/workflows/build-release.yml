@@ -29,7 +29,7 @@ jobs:
         if: ${{ inputs.osm == 'yes' }}
         continue-on-error: true
         run: |
-          pip install --quiet osmium
+          python3 -m pip install --quiet --user --break-system-packages osmium || python3 -m pip install --quiet osmium
           python3 tools/fetch_osm.py
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
