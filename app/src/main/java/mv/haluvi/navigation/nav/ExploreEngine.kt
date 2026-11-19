@@ -349,11 +349,16 @@ class ExploreEngine(
         googlePlaces.forEach { consider(it) }
         val pick = candidates.minWithOrNull(compareBy({ priority(it.first) }, { it.second })) ?: return false
         val (p, d, side) = pick
-        val text = "${p.name}, $side, ${Phrases.distance(d)}."
+        // Places at the same spot (shops in one building) are said together, so nothing is lost and it stays short.
+        val together = candidates.filter { Geo.distance(it.first.lat, it.first.lon, p.lat, p.lon) <= 8 }
+        val names = (listOf(p.name) + together.map { it.first.name }).distinctBy { it.lowercase() }.take(4)
+        val more = together.map { it.first.name.lowercase() }.distinct().size + 1 - names.size
+        val joined = (if (names.size == 1) names[0] else names.dropLast(1).joinToString(", ") + " and " + names.last()) +
+            if (more > 0) ", and $more more" else ""
+        val text = "$joined, $side, ${Phrases.distance(d)}."
         if (say(text)) {
             spokenPlaces[p.key] = now
-            // Also mark near-duplicates (same name close by) as spoken.
-            candidates.filter { it.first.name.equals(p.name, true) }.forEach { spokenPlaces[it.first.key] = now }
+            together.forEach { spokenPlaces[it.first.key] = now }
             return true
         }
         return false

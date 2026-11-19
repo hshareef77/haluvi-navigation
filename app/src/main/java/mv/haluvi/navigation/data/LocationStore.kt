@@ -180,15 +180,20 @@ class LocationStore(private val context: Context, private val islands: IslandRep
     fun byId(id: String?): SavedLocation? = if (id.isNullOrBlank()) null else _items.firstOrNull { it.id == id }
 
     /** Finds a stored place that is the same as a new one (same name within 30 m, or any place within 3 m). */
-    fun findDuplicate(name: String, lat: Double, lon: Double): SavedLocation? = _items.firstOrNull {
-        val d = Geo.distance(lat, lon, it.lat, it.lon)
-        (d <= 30 && it.name.equals(name.trim(), ignoreCase = true)) || d <= 3
+    /**
+     * The same place already saved: the same Google place, or exactly the same name within 30 m.
+     * Different places at the same spot (shops in one building, hotel room listings) are all kept,
+     * because each can be a destination.
+     */
+    fun findDuplicate(name: String, lat: Double, lon: Double, placeId: String = ""): SavedLocation? = _items.firstOrNull {
+        (placeId.isNotBlank() && it.placeId == placeId) ||
+            (it.name.equals(name.trim(), ignoreCase = true) && Geo.distance(lat, lon, it.lat, it.lon) <= 30)
     }
 
     /** Adds a place unless it already exists. Returns true when added. */
     @Synchronized
     fun add(loc: SavedLocation, persist: Boolean = true): Boolean {
-        if (findDuplicate(loc.name, loc.lat, loc.lon) != null) return false
+        if (findDuplicate(loc.name, loc.lat, loc.lon, loc.placeId) != null) return false
         ensureIsland(loc)
         _items.add(loc)
         if (persist) save()
@@ -332,7 +337,7 @@ class LocationStore(private val context: Context, private val islands: IslandRep
             }
         }
         for (loc in parsed) {
-            if (byId(loc.id) != null || findDuplicate(loc.name, loc.lat, loc.lon) != null) { skipped++; continue }
+            if (byId(loc.id) != null || findDuplicate(loc.name, loc.lat, loc.lon, loc.placeId) != null) { skipped++; continue }
             ensureIsland(loc)
             _items.add(loc)
             added++

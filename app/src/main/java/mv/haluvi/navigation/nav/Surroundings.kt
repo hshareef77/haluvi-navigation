@@ -35,7 +35,7 @@ object Surroundings {
     fun categoryLabel(id: String) = categories.firstOrNull { it.first == id }?.second ?: "All places"
 
     /** Nearest places (saved, downloaded and Google), at most [limit], within [radius] metres. */
-    suspend fun aroundMe(category: String, radius: Int = 500, limit: Int = 8): Pair<List<NearbyItem>, String?> {
+    suspend fun aroundMe(category: String, radius: Int = 500, limit: Int = 12): Pair<List<NearbyItem>, String?> {
         val g = AppGraph
         val f = g.location.freshFix(30_000) ?: return emptyList<NearbyItem>() to "Waiting for GPS."
         val out = LinkedHashMap<String, NearbyItem>()
@@ -64,7 +64,17 @@ object Surroundings {
     /** Spoken summary of [items] relative to the phone's heading. */
     fun speakList(items: List<NearbyItem>, heading: Double, note: String?): String {
         if (items.isEmpty()) return listOfNotNull("Nothing found nearby.", note).joinToString(" ")
-        val parts = items.take(5).map { Phrases.place(it.name, heading, it.bearing, it.distance) }
+        // Places at the same spot (shops in one building) are read in one line: "Pharmacy, Bakery and ATM, 2 o'clock, 12 meters".
+        val groups = ArrayList<MutableList<NearbyItem>>()
+        for (it in items) {
+            val g = groups.firstOrNull { gr -> Geo.distance(gr[0].lat, gr[0].lon, it.lat, it.lon) <= 8 }
+            if (g != null) g.add(it) else groups.add(arrayListOf(it))
+        }
+        val parts = groups.take(5).map { gr ->
+            val names = gr.map { it.name }.distinct()
+            val joined = if (names.size == 1) names[0] else names.dropLast(1).joinToString(", ") + " and " + names.last()
+            Phrases.place(joined, heading, gr[0].bearing, gr[0].distance)
+        }
         return (parts.joinToString(". ") + ".") + (note?.let { " $it" } ?: "")
     }
 

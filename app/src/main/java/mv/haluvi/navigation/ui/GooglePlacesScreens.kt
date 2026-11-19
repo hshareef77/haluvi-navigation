@@ -123,7 +123,7 @@ object GoogleIslandSearch {
                 if (joined != null && (mv.haluvi.navigation.nav.JoinedIslands.fromAddress(p.address, joined)
                         ?: mv.haluvi.navigation.nav.JoinedIslands.byLine(joined, p.lat, p.lon)).key != isl.key) continue
                 val f = GoogleFind(p, Categories.guess(p.typeText + " " + p.name), isl)
-                if (g.store.findDuplicate(p.name, p.lat, p.lon) != null) { saved.add(f.key); continue }
+                if (g.store.findDuplicate(p.name, p.lat, p.lon, p.placeId) != null) { saved.add(f.key); continue }
                 found.putIfAbsent(f.key, f)
             }
         }
@@ -285,6 +285,7 @@ class GooglePickResultsScreen : Screen() {
         val sel = GooglePick.selected
         if (sel.isEmpty()) { host.speak("Select places first."); return }
         var added = 0
+        val chosen = GooglePick.results.count { sel.contains(it.key) }
         GooglePick.results.filter { sel.contains(it.key) }.forEach { f ->
             val loc = SavedLocation(SavedLocation.newId(), f.place.name, f.place.lat, f.place.lon, 0.0,
                 source = SavedLocation.SOURCE_GOOGLE, categoryId = f.categoryId, islandKey = f.island.key,
@@ -294,7 +295,7 @@ class GooglePickResultsScreen : Screen() {
         g.store.save()
         GooglePick.results = GooglePick.results.filter { !sel.contains(it.key) }
         sel.clear()
-        host.speak("$added places saved to My places.")
+        host.speak("$added places saved to My places." + (if (chosen - added > 0) " ${chosen - added} were already saved (the same place)." else ""))
         rebuild()
     }
 }
