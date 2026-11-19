@@ -179,7 +179,9 @@ object OfflineMaps {
             }
             "Done. ${isl.name}: $places places, $roads roads, ${String.format(Locale.US, "%.1f", km)} kilometers of roads, $conn."
         } else "Done. $done islands: $places places and $roads roads saved for offline use."
-        return detail + if (failed.isNotEmpty()) " Failed, map server busy or no internet: ${failed.joinToString(", ")}. Press the download again to retry." else ""
+        return detail + if (failed.isEmpty()) "" else if (builtin)
+            " Built-in map could not be read for: ${failed.joinToString(", ")}" + (BuiltinMaps.lastError.ifBlank { null }?.let { " ($it)" } ?: "") + "."
+        else " Failed, map server busy or no internet: ${failed.joinToString(", ")}. Press the download again to retry."
     }
 
     private suspend fun <T> withRetry(block: suspend (attempt: Int) -> T): T? {
