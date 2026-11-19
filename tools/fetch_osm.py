@@ -50,14 +50,20 @@ class Collector(osmium.SimpleHandler):
 
 def main():
     pbf = os.path.join(ROOT, "maldives-latest.osm.pbf")
+    import subprocess
+    ok = False
     for attempt in range(5):
+        # curl over IPv4 first (some build machines have no IPv6 route), then Python's own download.
+        r = subprocess.run(["curl", "-4", "-fsSL", "--retry", "3", "--connect-timeout", "30", "-o", pbf, PBF_URL])
+        if r.returncode == 0 and os.path.exists(pbf) and os.path.getsize(pbf) > 100000:
+            ok = True; break
         try:
             urllib.request.urlretrieve(PBF_URL, pbf)
-            break
+            ok = True; break
         except Exception as e:
             print("download failed:", e, flush=True)
             time.sleep(30)
-    else:
+    if not ok:
         raise SystemExit("could not download the Maldives map file")
     print("map file", os.path.getsize(pbf), "bytes", flush=True)
     c = Collector()
