@@ -432,13 +432,16 @@ fun islandLabel(isl: Island, withAtoll: Boolean = true): String {
     val dist = f?.let { ", " + Phrases.distance(Geo.distance(it.lat, it.lon, isl.lat, isl.lon)) } ?: ""
     val name = if (isl.type == "inhabited" && isl.hasAirport) (if (withAtoll) isl.fullName else isl.name) + ", with airport"
         else if (isl.type == "inhabited") (if (withAtoll) isl.fullName else isl.name) else isl.spokenName
-    return name + ", " + offlinePlacesText(AppGraph.store.offlineCount(isl.key)) + dist
+    val roads = mv.haluvi.navigation.nav.OfflineMaps.status(isl.key)?.roads?.let { if (it == 1) ", 1 road" else ", $it roads" } ?: ""
+    return name + ", " + offlinePlacesText(AppGraph.store.offlineCount(isl.key)) + roads + dist
 }
 
 /** "Faafu, 5 islands, 120 offline places". */
 fun atollLabel(a: Atoll): String {
     val counts = AppGraph.store.countsByIsland()
-    return "${a.fullName}, ${islandsText(a.islands.size)}, ${offlinePlacesText(a.islands.sumOf { counts[it.key] ?: 0 })}"
+    val st = a.islands.mapNotNull { mv.haluvi.navigation.nav.OfflineMaps.status(it.key) }
+    val roads = if (st.isEmpty()) ", no roads" else ", ${st.sumOf { it.roads }} roads" + if (st.size < a.islands.size) " on ${st.size} of ${a.islands.size} islands" else ""
+    return "${a.fullName}, ${islandsText(a.islands.size)}, ${offlinePlacesText(a.islands.sumOf { counts[it.key] ?: 0 })}$roads"
 }
 
 fun islandsText(n: Int) = if (n == 1) "1 island" else "$n islands"

@@ -100,7 +100,7 @@ class AtollDetailsScreen(private val atoll: Atoll) : Screen(), OfflineProgressVi
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title(atoll.fullName)
         if (OfflineDownload.active) {
-            progressView = ui.info(OfflineDownload.progress)
+            progressView = ui.info(OfflineDownload.progress.ifBlank { "Starting." })
             ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
             ui.button("Back") { host.back() }
             return scroll
@@ -142,7 +142,7 @@ class IslandDetailsScreen(private val island: Island) : Screen(), OfflineProgres
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title(if (isl.atollFullName.isBlank()) isl.name else isl.fullName)
         if (OfflineDownload.active) {
-            progressView = ui.info(OfflineDownload.progress)
+            progressView = ui.info(OfflineDownload.progress.ifBlank { "Starting." })
             ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
             ui.button("Back") { host.back() }
             return scroll

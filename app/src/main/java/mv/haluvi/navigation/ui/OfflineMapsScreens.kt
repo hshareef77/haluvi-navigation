@@ -16,7 +16,9 @@ object OfflineDownload {
     var job: Job? = null
     var progress = ""
     var lastResult = ""
-    val active: Boolean get() = job?.isActive == true
+    /** True from start until the result is ready (cleared before the screen is rebuilt, so it never shows an empty progress). */
+    @Volatile var running = false
+    val active: Boolean get() = running
 
     /** Stops at once: closes the open server connection instead of waiting for its answer. */
     fun cancel(host: MainActivity) {
@@ -37,18 +39,29 @@ fun shareText(host: MainActivity, subject: String, text: String) {
 fun startOfflineDownload(host: MainActivity, islands: List<Island>, label: String) {
     if (OfflineDownload.active) { host.speak("A download is already running."); return }
     OfflineDownload.progress = "Starting: $label."
+    OfflineDownload.running = true
     host.speak("Downloading $label.")
     OfflineDownload.job = host.scope.launch {
+        var stopped = false
         val msg = try {
-            OfflineMaps.download(islands) { p -> OfflineDownload.progress = p; (host.currentScreen() as? OfflineProgressView)?.showProgress(p) }
+            OfflineMaps.download(islands) { p -> if (p.isNotBlank()) { OfflineDownload.progress = p; (host.currentScreen() as? OfflineProgressView)?.showProgress(p) } }
         } catch (e: CancellationException) {
-            "Stopped. What was downloaded is kept."
+            stopped = true
+            "What was downloaded is kept."
+        } catch (e: Exception) {
+            "Error: ${e.message ?: "unknown"}."
         }
-        OfflineDownload.lastResult = msg
+        val failed = !stopped && (msg.contains("fail", true) || msg.startsWith("Error"))
+        val head = when { stopped -> "Download stopped"; failed -> "Download failed or partly failed"; else -> "Download completed" }
+        val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())
+        OfflineDownload.lastResult = "$head at $time, $label. $msg"
         OfflineDownload.progress = ""
-        host.speak(msg)
+        OfflineDownload.running = false
+        host.speak("$head. $msg")
         (host.currentScreen() as? OfflineProgressView)?.let { (it as Screen).rebuild() }
     }
+    // Never left "running" by an unexpected error.
+    OfflineDownload.job?.invokeOnCompletion { if (OfflineDownload.running) { OfflineDownload.running = false; host.runOnUiThread { host.rebuild() } } }
     host.rebuild()
 }
 
@@ -65,7 +78,7 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
         val (scroll, ui) = UiBuilder.scrolling(host)
         titleView = ui.title("Download places")
         if (OfflineDownload.active) {
-            progressView = ui.info(OfflineDownload.progress)
+            progressView = ui.info(OfflineDownload.progress.ifBlank { "Starting." })
             ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
             ui.button("Back") { host.back() }
             return scroll

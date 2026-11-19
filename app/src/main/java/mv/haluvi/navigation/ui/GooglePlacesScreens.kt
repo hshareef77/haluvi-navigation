@@ -26,7 +26,9 @@ object GooglePick {
     var job: Job? = null
     var progress = ""
     var lastMessage = ""
-    val running: Boolean get() = job?.isActive == true
+    /** True from start until the result is ready (cleared before the screen changes). */
+    @Volatile var runningFlag = false
+    val running: Boolean get() = runningFlag
 }
 
 /**
@@ -149,7 +151,7 @@ class GooglePlacesScreen(private val preset: Pair<List<Island>, String>? = null)
             return scroll
         }
         if (GooglePick.running) {
-            progressView = ui.info(GooglePick.progress)
+            progressView = ui.info(GooglePick.progress.ifBlank { "Starting." })
             ui.button("Cancel", color = UiColors.BUTTON_STOP) {
                 GooglePick.job?.cancel(); mv.haluvi.navigation.net.Http.cancelAll()
                 GooglePick.progress = "Stopping."; progressView?.text = GooglePick.progress
@@ -206,6 +208,7 @@ class GooglePlacesScreen(private val preset: Pair<List<Island>, String>? = null)
         GooglePick.results = emptyList(); GooglePick.selected.clear()
         GooglePick.progress = "Searching Google for $label."
         host.speak("Searching Google places for $label.")
+        GooglePick.runningFlag = true
         GooglePick.job = host.scope.launch {
             val all = LinkedHashMap<String, GoogleFind>()
             var saved = 0; var requests = 0; var failed = 0; var limited = 0; var crowded = 0
@@ -238,11 +241,13 @@ class GooglePlacesScreen(private val preset: Pair<List<Island>, String>? = null)
                 "Stopped. ${all.size} places found so far."
             }
             GooglePick.lastMessage = msg
+            GooglePick.runningFlag = false
             host.speak(msg)
             if (host.currentScreen() === this@GooglePlacesScreen) {
                 if (GooglePick.results.isNotEmpty()) host.show { GooglePickResultsScreen() } else rebuild()
             }
         }
+        GooglePick.job?.invokeOnCompletion { if (GooglePick.runningFlag) { GooglePick.runningFlag = false; host.runOnUiThread { host.rebuild() } } }
         rebuild()
     }
 }
