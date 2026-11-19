@@ -27,7 +27,6 @@ class HomeScreen : Screen() {
         ui.button("Islands") { host.show { IslandsScreen() } }
         ui.button("Routes" + (g.routeTrip.activeRouteName?.let { ", travelling: $it" } ?: "")) { host.show { RoutesScreen() } }
         ui.button(if (g.explore.active) "Explore, running" else "Explore") { host.show { ExploreScreen() } }
-        ui.button("My places") { host.show { MyPlacesScreen() } }
         ui.button("Settings") { host.show { SettingsScreen() } }
         return scroll
     }

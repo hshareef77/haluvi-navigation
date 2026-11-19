@@ -45,6 +45,7 @@ class SettingsScreen : Screen() {
         ui.button("Navigation") { host.show { NavigationSettingsScreen() } }
         ui.button("Google Maps") { host.show { GoogleSettingsScreen() } }
         ui.button("Manage islands and places") { host.show { ManageScreen() } }
+        ui.button("First-start guide") { host.show { GuideScreen() } }
         ui.button("About") {
             host.show { TextScreen("About", listOf(
                 "Haluvi Navigation ${BuildConfig.VERSION_NAME}.",

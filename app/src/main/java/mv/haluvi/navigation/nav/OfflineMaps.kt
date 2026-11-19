@@ -86,7 +86,7 @@ object OfflineMaps {
      * Downloads outlines, places and roads for [islands] (inhabited islands), atoll by atoll.
      * Returns a spoken summary.
      */
-    suspend fun download(islands: List<Island>, onProgress: (String) -> Unit): String {
+    suspend fun download(islands: List<Island>, builtin: Boolean = false, onProgress: (String) -> Unit): String {
         val g = AppGraph
         running = true
         var places = 0; var roads = 0; var done = 0
@@ -101,14 +101,21 @@ object OfflineMaps {
                 val prefix = if (byAtoll.size > 1) "Atoll $step of ${byAtoll.size}: " else ""
                 // 1. Island outlines for this atoll (needed to put places and roads on the right island).
                 // Outlines are replaced only when the new download succeeds (old ones keep working meanwhile).
-                if (atoll.code !in g.shapes.atollsDone) IslandShapeDownloader.ensureAtoll(atoll, prefix, onProgress)
+                if (!builtin && atoll.code !in g.shapes.atollsDone) IslandShapeDownloader.ensureAtoll(atoll, prefix, onProgress)
                 // 2. Places and roads in one request each, for the box around the chosen islands.
                 val what = if (group.size == 1) group[0].name else atoll.fullName
                 val box = boxFor(group)
                 val main = android.os.Handler(android.os.Looper.getMainLooper())
                 var head = ""
                 g.osm.onStatus = { msg -> main.post { onProgress("$head $msg") } }
-                val result = try {
+                val result = if (builtin) {
+                    // Built into the app: no internet needed.
+                    if (!BuiltinMaps.has(atoll.code)) null
+                    else runCatching {
+                        onProgress(prefix + "$what: built-in map.")
+                        withContext(Dispatchers.IO) { BuiltinMaps.load(atoll.code) }.let { (pl, rd) -> pl to rd }
+                    }.getOrNull()
+                } else try {
                     withRetry { attempt ->
                         val tryText = if (attempt > 1) ", try $attempt of 3" else ""
                         head = prefix + "$what: places$tryText."

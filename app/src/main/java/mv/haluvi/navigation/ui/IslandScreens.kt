@@ -114,10 +114,18 @@ class AtollDetailsScreen(private val atoll: Atoll) : Screen(), OfflineProgressVi
         val f = g.location.fix
         val list = if (f != null) atoll.islands.sortedBy { Geo.distance(f.lat, f.lon, it.lat, it.lon) } else atoll.islands
         list.forEach { isl -> ui.button(islandLabel(isl, withAtoll = false)) { host.show { IslandDetailsScreen(isl) } } }
+        val others = extrasOfAtoll(atoll).let { l -> if (f != null) l.sortedBy { Geo.distance(f.lat, f.lon, it.lat, it.lon) } else l.sortedBy { it.name } }
+        if (others.isNotEmpty()) {
+            ui.heading("Airports, resorts and other islands: ${others.size}")
+            others.take(60).forEach { isl -> ui.button(islandLabel(isl)) { host.show { IslandDetailsScreen(isl) } } }
+        }
         ui.heading("Whole atoll")
         val any = atoll.islands.any { OfflineMaps.status(it.key) != null }
-        ui.button(if (any) "Update OpenStreetMap map, free" else "Download OpenStreetMap map, free") { startOfflineDownload(host, atoll.islands, atoll.fullName) }
-        ui.button("Get Google places, may cost money") { host.show { GooglePlacesScreen(atoll.islands to atoll.fullName) } }
+        if (mv.haluvi.navigation.nav.BuiltinMaps.has(atoll.code)) ui.button("Install built-in map, no internet needed", color = if (any) UiColors.BUTTON else UiColors.BUTTON_ON) {
+            startOfflineDownload(host, atoll.islands, atoll.fullName, builtin = true)
+        }
+        ui.button(if (any) "Update OpenStreetMap map from the internet, free" else "Download OpenStreetMap map, free") { startOfflineDownload(host, atoll.islands, atoll.fullName) }
+        if (g.settings.googleReady) ui.button("Get Google places, may cost money") { host.show { GooglePlacesScreen(atoll.islands to atoll.fullName) } }
         if (any) ui.button("Delete OpenStreetMap map", color = UiColors.BUTTON_STOP) {
             host.show { ConfirmScreen("Delete the OpenStreetMap map of ${atoll.fullName}: roads and downloaded places? Places you saved yourself and Google places are kept.", "Delete") {
                 val n = OfflineMaps.delete(atoll.islands); host.speak("$n places deleted."); host.back()
@@ -171,9 +179,13 @@ class IslandDetailsScreen(private val island: Island) : Screen(), OfflineProgres
         ui.heading("Get places")
         if (isl.atollIndex >= 0) {
             val have = OfflineMaps.status(isl.key) != null
-            ui.button(if (have) "Update OpenStreetMap map, free" else "Download OpenStreetMap map, free") { startOfflineDownload(host, listOf(isl), isl.name) }
+            val code = g.islands.atolls.getOrNull(isl.atollIndex)?.code
+            if (code != null && mv.haluvi.navigation.nav.BuiltinMaps.has(code)) ui.button("Install built-in map, no internet needed", color = if (have) UiColors.BUTTON else UiColors.BUTTON_ON) {
+                startOfflineDownload(host, listOf(isl), isl.name, builtin = true)
+            }
+            ui.button(if (have) "Update OpenStreetMap map from the internet, free" else "Download OpenStreetMap map, free") { startOfflineDownload(host, listOf(isl), isl.name) }
         }
-        ui.button("Get Google places, may cost money") { host.show { GooglePlacesScreen(listOf(isl) to isl.name) } }
+        if (g.settings.googleReady) ui.button("Get Google places, may cost money") { host.show { GooglePlacesScreen(listOf(isl) to isl.name) } }
 
         val osm = g.store.countForIsland(isl.key, SavedLocation.SOURCE_OSM_MAP)
         val google = g.store.countForIsland(isl.key, SavedLocation.SOURCE_GOOGLE)

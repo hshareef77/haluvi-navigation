@@ -59,12 +59,22 @@ class PlacesScreen : Screen() {
         if (active != null) ui.button("Going to ${active.name}. Open", color = UiColors.BUTTON_ON) { host.showNavigation() }
 
         fromButton = ui.button(fromLabel()) {
-            host.show { MyPlacesScreen(title = "From", firstChoice = "My location" to { s.placeFromId = ""; host.say("From: my location"); host.backTo(this@PlacesScreen) }) { loc ->
-                s.placeFromId = loc.id; host.say("From: ${loc.name}"); host.backTo(this@PlacesScreen)
+            host.show { ChoosePlaceScreen("From", "My location" to { s.placeFromId = ""; host.say("From: my location"); host.backTo(this@PlacesScreen) }) { loc ->
+                // A From place must be saved (it is remembered by its id).
+                val saved = g.store.byId(loc.id) ?: g.store.findDuplicate(loc.name, loc.lat, loc.lon, loc.placeId) ?: loc.also { g.store.add(it) }
+                s.placeFromId = saved.id; host.say("From: ${saved.name}"); host.backTo(this@PlacesScreen)
             } }
         }
         val to = Selection.placeTo
-        toButton = ui.button(toLabel()) { host.show { ChooseToScreen() } }
+        toButton = ui.button(toLabel()) {
+            host.show { ChoosePlaceScreen("To") { loc -> Selection.placeTo = loc; host.say("To: ${loc.name}"); host.backTo(this@PlacesScreen) } }
+        }
+        val fromPlace = g.store.byId(s.placeFromId)
+        if (fromPlace != null && to != null) ui.button("Swap From and To") {
+            val newFrom = g.store.byId(to.id) ?: g.store.findDuplicate(to.name, to.lat, to.lon, to.placeId) ?: to.also { g.store.add(it) }
+            Selection.placeTo = fromPlace; s.placeFromId = newFrom.id
+            host.say("From ${newFrom.name}, to ${fromPlace.name}"); rebuild()
+        }
         ui.button("Travel: ${s.travelMode.label}") {
             s.travelMode = if (s.travelMode == TravelMode.WALKING) TravelMode.DRIVING else TravelMode.WALKING
             g.nav.refreshRoute()
@@ -75,13 +85,15 @@ class PlacesScreen : Screen() {
             val dest = Selection.placeTo
             when {
                 !host.hasLocationPermission() -> host.requestPermissionsIfNeeded()
-                dest == null -> { host.speak("Please choose where to go."); host.show { ChooseToScreen() } }
+                dest == null -> { host.speak("Please choose where to go."); toButton?.performClick() }
                 else -> { g.nav.start(Destination.of(dest)); host.showNavigation() }
             }
         }
-        if (to != null && g.store.byId(to.id) == null && g.store.findDuplicate(to.name, to.lat, to.lon) == null) {
+        if (to != null && g.store.byId(to.id) == null && g.store.findDuplicate(to.name, to.lat, to.lon, to.placeId) == null) {
             ui.button("Save ${to.name} to my places") { g.store.add(to); host.speak("Saved."); rebuild() }
         }
+        ui.button("Save this place, where I am") { host.show { SavePlaceScreen() } }
+        ui.button("All my places: details, edit, delete") { host.show { MyPlacesScreen() } }
         ui.button("Back") { host.back() }
         return scroll
     }

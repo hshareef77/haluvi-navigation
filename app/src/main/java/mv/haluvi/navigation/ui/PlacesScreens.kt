@@ -444,6 +444,11 @@ fun atollLabel(a: Atoll): String {
     return "${a.fullName}, ${islandsText(a.islands.size)}, ${offlinePlacesText(a.islands.sumOf { counts[it.key] ?: 0 })}$roads"
 }
 
+/** Airports, resorts and other islands of an atoll (by their nearest inhabited island, within 40 km). */
+fun extrasOfAtoll(a: Atoll): List<Island> = AppGraph.shapes.extras.filter { e ->
+    AppGraph.islands.nearest(e.lat, e.lon)?.takeIf { it.distance <= 40_000 }?.island?.atollIndex == a.index
+}
+
 fun islandsText(n: Int) = if (n == 1) "1 island" else "$n islands"
 
 /** When each island was last searched on Google (kept on the phone). */
@@ -495,6 +500,11 @@ class IslandPickerScreen(private val atoll: Atoll, private val onPick: (Island) 
         val f = AppGraph.location.fix
         val list = if (f != null) atoll.islands.sortedBy { Geo.distance(f.lat, f.lon, it.lat, it.lon) } else atoll.islands
         list.forEach { island -> ui.button(islandLabel(island, withAtoll = false)) { onPick(island) } }
+        val others = extrasOfAtoll(atoll).let { l -> if (f != null) l.sortedBy { Geo.distance(f.lat, f.lon, it.lat, it.lon) } else l.sortedBy { it.name } }
+        if (others.isNotEmpty()) {
+            ui.heading("Airports, resorts and other islands")
+            others.take(60).forEach { isl -> ui.button(islandLabel(isl)) { onPick(isl) } }
+        }
         ui.button("Back") { host.back() }
         return scroll
     }

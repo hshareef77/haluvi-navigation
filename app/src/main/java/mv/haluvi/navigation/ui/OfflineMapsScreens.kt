@@ -36,15 +36,15 @@ fun shareText(host: MainActivity, subject: String, text: String) {
 }
 
 /** Starts a download of [islands] and shows progress on whatever Offline maps screen is open. */
-fun startOfflineDownload(host: MainActivity, islands: List<Island>, label: String) {
+fun startOfflineDownload(host: MainActivity, islands: List<Island>, label: String, builtin: Boolean = false) {
     if (OfflineDownload.active) { host.speak("A download is already running."); return }
     OfflineDownload.progress = "Starting: $label."
     OfflineDownload.running = true
-    host.speak("Downloading $label.")
+    host.speak(if (builtin) "Installing the built-in map of $label." else "Downloading $label.")
     OfflineDownload.job = host.scope.launch {
         var stopped = false
         val msg = try {
-            OfflineMaps.download(islands) { p -> if (p.isNotBlank()) { OfflineDownload.progress = p; (host.currentScreen() as? OfflineProgressView)?.showProgress(p) } }
+            OfflineMaps.download(islands, builtin) { p -> if (p.isNotBlank()) { OfflineDownload.progress = p; (host.currentScreen() as? OfflineProgressView)?.showProgress(p) } }
         } catch (e: CancellationException) {
             stopped = true
             "What was downloaded is kept."
@@ -52,7 +52,8 @@ fun startOfflineDownload(host: MainActivity, islands: List<Island>, label: Strin
             "Error: ${e.message ?: "unknown"}."
         }
         val failed = !stopped && (msg.contains("fail", true) || msg.startsWith("Error"))
-        val head = when { stopped -> "Download stopped"; failed -> "Download failed or partly failed"; else -> "Download completed" }
+        val what = if (builtin) "Built-in map" else "Download"
+        val head = when { stopped -> "$what stopped"; failed -> "$what failed or partly failed"; else -> if (builtin) "Built-in map installed" else "Download completed" }
         val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())
         OfflineDownload.lastResult = "$head at $time, $label. $msg"
         OfflineDownload.progress = ""
@@ -86,7 +87,19 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
         progressView = null
         if (OfflineDownload.lastResult.isNotBlank()) ui.info(OfflineDownload.lastResult)
 
-        ui.heading("OpenStreetMap: free, roads and places")
+        mv.haluvi.navigation.nav.BuiltinMaps.date()?.let { d ->
+            ui.heading("Built-in maps: no internet needed")
+            ui.info("OpenStreetMap roads and places built into the app (from $d).")
+            OfflineMaps.myIsland()?.let { mine ->
+                ui.button("Install for my island: ${mine.name}", color = UiColors.BUTTON_ON) { startOfflineDownload(host, listOf(mine), mine.name, builtin = true) }
+            }
+            ui.button("Install for all islands") {
+                host.show { ConfirmScreen("Install the built-in map of all ${g.islands.allIslands.size} islands? No internet needed; it takes a minute or two.", "Install all") {
+                    host.backTo(this@OfflineMapsScreen); startOfflineDownload(host, g.islands.allIslands, "the whole Maldives", builtin = true)
+                } }
+            }
+        }
+        ui.heading("OpenStreetMap from the internet: free, newest")
         ui.info("${OfflineMaps.statuses().size} islands downloaded. Roads are needed for offline routes.")
         val mine = OfflineMaps.myIsland()
         if (mine != null) {
@@ -103,8 +116,10 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
                 }
             }
         }
-        ui.heading("Google: needs your API key, may cost money")
-        ui.button("Get Google places") { host.show { GooglePlacesScreen() } }
+        if (g.settings.googleReady) {
+            ui.heading("Google: your API key, may cost money")
+            ui.button("Get Google places") { host.show { GooglePlacesScreen() } }
+        }
         ui.info("Map data © OpenStreetMap contributors.")
         ui.button("Back") { host.back() }
         return scroll

@@ -395,6 +395,11 @@ class OpenStreetMap {
         )
         val q = "[out:json][timeout:180];(" + f.joinToString("") { "node$b$it;way$b$it;" } + ");out center tags;"
         val arr = JSONObject(overpass(q, readSeconds = 60)).optJSONArray("elements") ?: return emptyList()
+        return parsePlaces(arr)
+    }
+
+    /** Places from Overpass elements (downloaded, or built into the app). */
+    fun parsePlaces(arr: JSONArray): List<MapPlace> {
         val out = ArrayList<MapPlace>()
         val seen = HashSet<String>()
         for (i in 0 until arr.length()) {
@@ -439,6 +444,11 @@ class OpenStreetMap {
     fun roadsInBox(south: Double, west: Double, north: Double, east: Double): List<DownloadedRoad> {
         val q = "[out:json][timeout:180];way($south,$west,$north,$east)[\"highway\"~\"^(primary|secondary|tertiary|unclassified|residential|living_street|service|pedestrian|footway|path|track|road|steps|cycleway)$\"];out geom tags;"
         val arr = JSONObject(overpass(q, readSeconds = 60)).optJSONArray("elements") ?: return emptyList()
+        return parseRoads(arr)
+    }
+
+    /** Roads from Overpass elements (downloaded, or built into the app). */
+    fun parseRoads(arr: JSONArray): List<DownloadedRoad> {
         val out = ArrayList<DownloadedRoad>()
         for (i in 0 until arr.length()) {
             val e = arr.getJSONObject(i)

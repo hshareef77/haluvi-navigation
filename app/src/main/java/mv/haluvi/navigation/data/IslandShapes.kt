@@ -56,7 +56,7 @@ class IslandShapes(private val context: Context, private val islands: IslandRepo
     /** Built-in positions, kept so corrections can be re-applied or undone. */
     private val original: Map<String, LatLon> = islands.allIslands.associate { it.key to LatLon(it.lat, it.lon) }
 
-    init { load(); mergeBuiltin(); applyCorrections(); extras = extras }
+    init { load(); mergeBuiltin(); extras = extras; applyCorrections() }
 
     val count: Int get() = islands.allIslands.count { has(it.key) }
     val isEmpty: Boolean get() = islandRing.isEmpty()
@@ -204,8 +204,10 @@ class IslandShapes(private val context: Context, private val islands: IslandRepo
 
     /** Moves islands with a corrected position to the middle of their real outline. */
     private fun applyCorrections() {
+        // An island joined to an airport island (Hulhumale to Hulhule) does not have the airport itself.
+        val airportRings = extras.filter { it.type == "airport" }.mapNotNull { islandRing[it.key] }.toSet()
         for (isl in islands.allIslands) {
-            isl.hasAirport = isl.key in airportIslands || isl.key in KNOWN_AIRPORT_ISLANDS
+            isl.hasAirport = (isl.key in airportIslands || isl.key in KNOWN_AIRPORT_ISLANDS) && islandRing[isl.key] !in airportRings
             val c = corrected[isl.key] ?: original[isl.key] ?: continue
             isl.lat = c.lat; isl.lon = c.lon
         }

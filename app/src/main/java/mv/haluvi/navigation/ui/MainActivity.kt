@@ -63,7 +63,7 @@ class MainActivity : Activity() {
         AppGraph.nav.addListener(liveListener)
         AppGraph.explore.addListener(liveListener)
         showHome()
-        requestPermissionsIfNeeded()
+        if (!AppGraph.settings.guideDone) show { GuideScreen() } else requestPermissionsIfNeeded()
         if (AppGraph.settings.islandAlertsOn) mv.haluvi.navigation.nav.NavigationService.ensureRunning(this)
         // Keep saved Google places within Google's terms (positions refreshed from place IDs).
         if (AppGraph.settings.googleReady) scope.launch { runCatching { mv.haluvi.navigation.nav.GooglePlaceRefresh.run() } }
