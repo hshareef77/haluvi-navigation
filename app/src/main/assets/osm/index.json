@@ -3,124 +3,124 @@
  "source": "Geofabrik Maldives extract",
  "atolls": {
   "HA": {
-   "places": 268,
+   "places": 270,
    "roads": 900,
-   "bytes": 40651,
-   "sha256": "4e98b638f0ee88bad62994f3b7821741af0c5dc4ea82b5a1fc1c99ee774fd677"
+   "bytes": 40761,
+   "sha256": "ed516eb189faf0be37b9233e6773bde0e159c2e06c628745b6dd99d7346f49d5"
   },
   "HDh": {
-   "places": 260,
+   "places": 264,
    "roads": 1241,
-   "bytes": 63959,
-   "sha256": "99a42450814a37603fa24b19b79f0c5cac7b6e476b850416557e4ef313c15a1a"
+   "bytes": 64155,
+   "sha256": "f08f239d4a0b586f47578ae503a3c15e8ca865eb7b1c11c82c16a22468a87579"
   },
   "Sh": {
-   "places": 137,
+   "places": 139,
    "roads": 434,
-   "bytes": 21039,
-   "sha256": "6ac6ff6eaac976733d9c894bc0e3091ea9749400aef45099183cb905ebc01e34"
+   "bytes": 21173,
+   "sha256": "edb8844c1ff1b524d670e967c36f23ad3e93b4c7bb1872d17e1bae4282d0926e"
   },
   "N": {
-   "places": 263,
+   "places": 268,
    "roads": 882,
-   "bytes": 47766,
-   "sha256": "a52e80d9e406167d7ccc94e306bef59c31f49092a91655091f497e11611d408b"
+   "bytes": 47970,
+   "sha256": "a1a85125f918a65564cc2d367748dff53552ae397553b09dd558dbb92d2f32a9"
   },
   "R": {
-   "places": 504,
+   "places": 505,
    "roads": 812,
-   "bytes": 42449,
-   "sha256": "1193b59cd390ae43759f929109ecc9021173b1ee071e772e1ad95613d48fb769"
+   "bytes": 42518,
+   "sha256": "bee530b0ed77c27c2d0bf5b568becd2d1a6e03355d77c5914d5fc4eb25f0319d"
   },
   "B": {
-   "places": 592,
+   "places": 594,
    "roads": 654,
-   "bytes": 44751,
-   "sha256": "6fe2e750ec3aebc9cdb044f1b3005aec46b96bd7dc9f56b4fc0cddebc156962d"
+   "bytes": 44861,
+   "sha256": "164e4b5cc7d899712d1570fb7c35c861e879890673ad2f6f55f71dfe908fd7cd"
   },
   "Lh": {
-   "places": 136,
+   "places": 138,
    "roads": 285,
-   "bytes": 16401,
-   "sha256": "8d149fb27da5bbb3c28de5cedbc5a850864e60faa8a6908ce5508c531c8df19a"
+   "bytes": 16501,
+   "sha256": "69ecc9807a6c37dfaadb4082860b4843a4adbe943c6d2d50bcc51fc6a1c7a884"
   },
   "K": {
-   "places": 3886,
+   "places": 3899,
    "roads": 2906,
-   "bytes": 240749,
-   "sha256": "ff49ad3ff589e88b34fb199595bf1553752fdbf892900bf2adeaccbb2183c636"
+   "bytes": 241659,
+   "sha256": "69c857db05ee1d5800d89222785daee841f520743e1030f0a2a9d5e315b1921f"
   },
   "AA": {
-   "places": 873,
+   "places": 874,
    "roads": 478,
-   "bytes": 42314,
-   "sha256": "043e214d07a7b1412b3c811d3413493e0d8236e8454ed041cf788021992fcf15"
+   "bytes": 42351,
+   "sha256": "b57fdf103459cf78e080cd53cc1798c00f24bc4e1c1b8ee1cae9b7f5ba6f315c"
   },
   "ADh": {
-   "places": 1354,
+   "places": 1356,
    "roads": 555,
-   "bytes": 44983,
-   "sha256": "09ee6fa2b4cd1f7fd4719edb576a9cbd48921231dc6cdf1ebe1cbdc885939a42"
+   "bytes": 45078,
+   "sha256": "51e37f300fc5f223656cf0ef991c5a4ec232d0d099bcb5e680adf8c5c961eef7"
   },
   "V": {
-   "places": 132,
+   "places": 133,
    "roads": 46,
-   "bytes": 5415,
-   "sha256": "28a8548a5f8f2f34af46667ebfa944a8138fa679799f465ac3718f90d4248eb3"
+   "bytes": 5454,
+   "sha256": "7ab2152d1c6e68c2bb6ab85df66629aefc66e48704a6934a789673e3a79fedfd"
   },
   "M": {
-   "places": 190,
+   "places": 193,
    "roads": 218,
-   "bytes": 9805,
-   "sha256": "29f5de43ff28b9793951fd1770d824f3e37a2df7f09e5b65d38aab6d66ff1945"
+   "bytes": 9968,
+   "sha256": "d3c2e4cd53509796be15a5a27901ab8a64eb68267524577b33399d27e975662d"
   },
   "F": {
    "places": 24,
    "roads": 119,
    "bytes": 4984,
-   "sha256": "4be212654ffb49b55bfff61e4b96ad2eee4ffd229ea9db7a53158b6845736dea"
+   "sha256": "49fa0390a60a66442060fdffd3306213a6a79caaa68da024c05b364b8b14c1a3"
   },
   "Dh": {
-   "places": 365,
+   "places": 367,
    "roads": 330,
-   "bytes": 22778,
-   "sha256": "c493c468094ceb41813b7a67dbb581a854096d0f7f7aa36444568dc04ffae842"
+   "bytes": 22912,
+   "sha256": "60ec092062c1368462f529be283ce3183d38ffc86d97f4f1a550e5e9d7bd6432"
   },
   "Th": {
-   "places": 70,
+   "places": 71,
    "roads": 400,
-   "bytes": 18203,
-   "sha256": "89b57e151d7b16cbb588711a2bdf9bce15a005508249733c6ed5943f4969ccab"
+   "bytes": 18260,
+   "sha256": "fcce037e65238931283518632fcbe8558a2fc1f0c69cc1c70d3a6645b9153bb6"
   },
   "L": {
-   "places": 110,
+   "places": 112,
    "roads": 627,
-   "bytes": 35515,
-   "sha256": "b52d90afbbe27305846ef1fb121b9a66cdf2359a4f84b5b04548fb3971b3fc55"
+   "bytes": 35659,
+   "sha256": "9bab47b7df319af10a62eaec6010d238fd1f21964dea4e1cf4b7840d3fc9ed98"
   },
   "GA": {
-   "places": 170,
+   "places": 172,
    "roads": 342,
-   "bytes": 17902,
-   "sha256": "6976f8674ac97ab4ecd43bac6854776f893d65db713e2a68899798a4004d6408"
+   "bytes": 17984,
+   "sha256": "e119c33a9960c4eecf91fbb5d0f49b37780120b6bc987355987d52b14da0939d"
   },
   "GDh": {
-   "places": 200,
+   "places": 203,
    "roads": 579,
-   "bytes": 29928,
-   "sha256": "41f0394ac4a8143d233eb4d0b4cb91861d5e9ceccee565fecf26a71db1c41148"
+   "bytes": 30122,
+   "sha256": "0ff8e0bcabe49c9ca651ff1055e1dcaf17e8131bc90ccf1ad2bd2bf5fda43cd2"
   },
   "Gn": {
-   "places": 285,
+   "places": 287,
    "roads": 569,
-   "bytes": 34114,
-   "sha256": "04e2586079e593c48e5ab061b48453aa16ee14c9becb3efdc1b07e20b3c09ea7"
+   "bytes": 34195,
+   "sha256": "efcdf87af2a72ef4c3e97cef86a9fcab74904e2072ed9cc720d3baa6d9c2abdf"
   },
   "S": {
-   "places": 648,
+   "places": 650,
    "roads": 1106,
-   "bytes": 67737,
-   "sha256": "47d23118a9b351232c5a2409f4f3962d49a55f046a6aef3de78b38feb7b89eba"
+   "bytes": 67846,
+   "sha256": "5c0624baeadecfc8e366acd1f034f60f90dcc28f8308babf41d145571ed21248"
   }
  }
 }
