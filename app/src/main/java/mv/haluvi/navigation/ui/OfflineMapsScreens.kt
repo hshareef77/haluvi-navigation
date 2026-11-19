@@ -82,7 +82,7 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
         titleView = ui.title("Download places")
         if (OfflineDownload.active) {
             progressView = ui.info(OfflineDownload.progress.ifBlank { "Starting." })
-            ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
+            ui.button("Cancel", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
             ui.button("Back") { host.back() }
             return scroll
         }
@@ -102,7 +102,7 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
             }
         }
         ui.heading("OpenStreetMap from the internet: free, newest")
-        ui.info("${OfflineMaps.statuses().size} islands downloaded. Roads are needed for offline routes.")
+        ui.info("${OfflineMaps.statuses().size} islands have an offline map. Downloading gets the newest data from the internet.")
         val mine = OfflineMaps.myIsland()
         if (mine != null) {
             ui.button("My island: ${mine.name}" + if (OfflineMaps.status(mine.key) != null) ". Update" else ". Download", color = UiColors.BUTTON_ON) {
@@ -110,7 +110,7 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
             }
         } else ui.info("My island: waiting for GPS.")
         ui.button("Choose atoll or island") { host.show { AtollsScreen() } }
-        ui.button("Whole Maldives") {
+        ui.button("Whole Maldives from the internet, slow") {
             host.show {
                 ConfirmScreen("Download all ${g.islands.allIslands.size} islands in all 20 atolls? It takes about 10 to 30 minutes and needs good internet. You can keep using the phone.", "Download all") {
                     host.backTo(this@OfflineMapsScreen)
@@ -136,7 +136,7 @@ class AirportsScreen(private val onPick: (Island) -> Unit) : Screen() {
         titleView = ui.title("Airports")
         val f = g.location.fix
         val list = g.shapes.airports().let { l -> if (f != null) l.sortedBy { mv.haluvi.navigation.core.Geo.distance(f.lat, f.lon, it.lat, it.lon) } else l.sortedBy { it.name } }
-        if (list.isEmpty()) ui.info("No airports yet. Download offline maps or island outlines first.")
+        if (list.isEmpty()) ui.info("No airports found.")
         list.forEach { isl -> ui.button(islandLabel(isl)) { onPick(isl) } }
         ui.button("Back") { host.back() }
         return scroll

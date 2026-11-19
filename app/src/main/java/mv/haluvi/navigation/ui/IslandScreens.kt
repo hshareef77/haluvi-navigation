@@ -38,24 +38,8 @@ class ManageScreen : Screen() {
         titleView = ui.title("Manage islands and places")
         ui.info("${offlinePlacesText(g.store.items.size).replaceFirstChar { it.uppercase() }} on the phone. ${OfflineMaps.statuses().size} islands with an offline map.")
         ui.button("Atolls and islands", color = UiColors.BUTTON_ON) { host.show { AtollsScreen() } }
-        ui.button("Download places: OpenStreetMap or Google") { host.show { OfflineMapsScreen() } }
-        ui.button("All places: by source or category") {
-            host.show {
-                ChoiceScreen("All places", null,
-                    listOf(SavedLocation.SOURCE_MANUAL, SavedLocation.SOURCE_OSM_MAP, SavedLocation.SOURCE_GOOGLE, SavedLocation.SOURCE_OSM_SEARCH).map { src ->
-                        "${sourceName(src)}: ${g.store.items.count { it.source == src }}" to {
-                            host.show { MyPlacesScreen(filter = PlaceFilter(source = src, label = sourceName(src))) }
-                        }
-                    } + listOf("By category" to {
-                        host.show { ChoiceScreen("By category", null, Categories.all.map { c ->
-                            "${c.name}: ${g.store.items.count { it.categoryId == c.id }}" to {
-                                host.show { MyPlacesScreen(filter = PlaceFilter(category = c.id, label = c.name)) }
-                            }
-                        }) }
-                    })
-                )
-            }
-        }
+        ui.button("Maps and places: update or get more") { host.show { OfflineMapsScreen() } }
+        ui.button("All places: find, edit, delete") { host.show { ChoosePlaceScreen("All places") } }
         ui.button("My roads: ${g.store.roadNames.all().size}") { host.show { MyRoadsScreen() } }
         ui.heading("Backup and sharing")
         ui.button("Full backup, for my own phone") { exportBackup(host) }
@@ -113,7 +97,7 @@ class AtollDetailsScreen(private val atoll: Atoll) : Screen(), OfflineProgressVi
         titleView = ui.title(atoll.fullName)
         if (OfflineDownload.active) {
             progressView = ui.info(OfflineDownload.progress.ifBlank { "Starting." })
-            ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
+            ui.button("Cancel", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
             ui.button("Back") { host.back() }
             return scroll
         }
@@ -133,7 +117,7 @@ class AtollDetailsScreen(private val atoll: Atoll) : Screen(), OfflineProgressVi
         }
         ui.heading("Whole atoll")
         val any = atoll.islands.any { OfflineMaps.status(it.key) != null }
-        if (mv.haluvi.navigation.nav.BuiltinMaps.has(atoll.code)) ui.button("Install built-in map, no internet needed", color = if (any) UiColors.BUTTON else UiColors.BUTTON_ON) {
+        if (mv.haluvi.navigation.nav.BuiltinMaps.has(atoll.code)) ui.button("Re-install built-in map, no internet needed") {
             startOfflineDownload(host, atoll.islands, atoll.fullName, builtin = true)
         }
         ui.button(if (any) "Update OpenStreetMap map from the internet, free" else "Download OpenStreetMap map, free") { startOfflineDownload(host, atoll.islands, atoll.fullName) }
@@ -163,7 +147,7 @@ class IslandDetailsScreen(private val island: Island) : Screen(), OfflineProgres
         titleView = ui.title(if (isl.atollFullName.isBlank()) isl.name else isl.fullName)
         if (OfflineDownload.active) {
             progressView = ui.info(OfflineDownload.progress.ifBlank { "Starting." })
-            ui.button("Cancel download", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
+            ui.button("Cancel", color = UiColors.BUTTON_STOP) { OfflineDownload.cancel(host) }
             ui.button("Back") { host.back() }
             return scroll
         }
@@ -185,32 +169,7 @@ class IslandDetailsScreen(private val island: Island) : Screen(), OfflineProgres
             Selection.islandTo = isl; host.say("To: ${isl.name}"); host.showTrip { IslandsScreen() }
         }
         ui.button("Places on this island: ${g.store.offlineCount(isl.key)}") {
-            host.show { MyPlacesScreen(filter = PlaceFilter(islandKey = isl.key, label = isl.name)) }
-        }
-
-        ui.heading("Get places")
-        if (isl.atollIndex >= 0) {
-            val have = OfflineMaps.status(isl.key) != null
-            val code = g.islands.atolls.getOrNull(isl.atollIndex)?.code
-            if (code != null && mv.haluvi.navigation.nav.BuiltinMaps.has(code)) ui.button("Install built-in map, no internet needed", color = if (have) UiColors.BUTTON else UiColors.BUTTON_ON) {
-                startOfflineDownload(host, listOf(isl), isl.name, builtin = true)
-            }
-            ui.button(if (have) "Update OpenStreetMap map from the internet, free" else "Download OpenStreetMap map, free") { startOfflineDownload(host, listOf(isl), isl.name) }
-        }
-        if (g.settings.googleReady) ui.button("Get Google places, may cost money") { host.show { GooglePlacesScreen(listOf(isl) to isl.name) } }
-
-        val osm = g.store.countForIsland(isl.key, SavedLocation.SOURCE_OSM_MAP)
-        val google = g.store.countForIsland(isl.key, SavedLocation.SOURCE_GOOGLE)
-        if ((isl.atollIndex >= 0 && OfflineMaps.status(isl.key) != null) || osm > 0 || google > 0) ui.heading("Delete")
-        if (isl.atollIndex >= 0 && OfflineMaps.status(isl.key) != null) ui.button("Delete OpenStreetMap map and its $osm places", color = UiColors.BUTTON_STOP) {
-            host.show { ConfirmScreen("Delete the OpenStreetMap map of ${isl.name}: its roads and $osm downloaded places? Places you saved yourself and Google places are kept.", "Delete") {
-                val n = OfflineMaps.delete(listOf(isl)); host.speak("$n places deleted."); host.back()
-            } }
-        }
-        if (google > 0) ui.button("Delete Google places: $google", color = UiColors.BUTTON_STOP) {
-            host.show { ConfirmScreen("Delete all $google Google places on ${isl.name}?", "Delete") {
-                val n = g.store.deleteForIsland(isl.key, SavedLocation.SOURCE_GOOGLE); host.speak("$n places deleted."); host.back()
-            } }
+            host.show { ChoosePlaceScreen("Places on ${isl.name}", startIsland = isl) }
         }
 
         // Joined islands: set the border between this island and its neighbour.
@@ -220,6 +179,18 @@ class IslandDetailsScreen(private val island: Island) : Screen(), OfflineProgres
             }
         }
         ui.button("Areas on this island: ${mv.haluvi.navigation.nav.Areas.of(isl.key).size}") { host.show { AreasScreen(isl) } }
+
+
+        ui.heading("Get places")
+        if (isl.atollIndex >= 0) {
+            val have = OfflineMaps.status(isl.key) != null
+            val code = g.islands.atolls.getOrNull(isl.atollIndex)?.code
+            if (code != null && mv.haluvi.navigation.nav.BuiltinMaps.has(code)) ui.button("Re-install built-in map, no internet needed") {
+                startOfflineDownload(host, listOf(isl), isl.name, builtin = true)
+            }
+            ui.button(if (have) "Update OpenStreetMap map from the internet, free" else "Download OpenStreetMap map, free") { startOfflineDownload(host, listOf(isl), isl.name) }
+        }
+        if (g.settings.googleReady) ui.button("Get Google places, may cost money") { host.show { GooglePlacesScreen(listOf(isl) to isl.name) } }
 
         ui.heading("Change island")
         ui.button("Rename") {
@@ -248,6 +219,21 @@ class IslandDetailsScreen(private val island: Island) : Screen(), OfflineProgres
         if (IslandOverrides.hasChange(isl.key)) ui.button("Restore the app's original name and type") {
             IslandOverrides.restore(isl); host.speak("Restored."); rebuild()
         }
+
+        val osm = g.store.countForIsland(isl.key, SavedLocation.SOURCE_OSM_MAP)
+        val google = g.store.countForIsland(isl.key, SavedLocation.SOURCE_GOOGLE)
+        if ((OfflineMaps.status(isl.key) != null) || osm > 0 || google > 0) ui.heading("Delete")
+        if (OfflineMaps.status(isl.key) != null) ui.button("Delete OpenStreetMap map and its $osm places", color = UiColors.BUTTON_STOP) {
+            host.show { ConfirmScreen("Delete the OpenStreetMap map of ${isl.name}: its roads and $osm downloaded places? Places you saved yourself and Google places are kept.", "Delete") {
+                val n = OfflineMaps.delete(listOf(isl)); host.speak("$n places deleted."); host.back()
+            } }
+        }
+        if (google > 0) ui.button("Delete Google places: $google", color = UiColors.BUTTON_STOP) {
+            host.show { ConfirmScreen("Delete all $google Google places on ${isl.name}?", "Delete") {
+                val n = g.store.deleteForIsland(isl.key, SavedLocation.SOURCE_GOOGLE); host.speak("$n places deleted."); host.back()
+            } }
+        }
+
         ui.button("Back") { host.back() }
         return scroll
     }
@@ -300,10 +286,7 @@ class BorderScreen(private val aKey: String, private val aName: String, private 
         ui.button("Set border at a place") {
             val pick: (SavedLocation) -> Unit = { loc -> apply(loc.lat, loc.lon, "at ${loc.name}") }
             host.show {
-                ChoiceScreen("Border at a place", "For example a school or mosque at the joining point.", listOf(
-                    "My places" to { host.show { MyPlacesScreen(title = "Border place") { loc -> pick(loc) } } },
-                    "Search" to { PlacePick.handler = pick; host.show { SearchScreen() } }
-                ))
+                ChoosePlaceScreen("Border at a place, for example a school at the joining point", onPick = pick)
             }
         }
         if (cur != null) ui.button("Clear my border", color = UiColors.BUTTON_STOP) {
@@ -330,7 +313,7 @@ class AreasScreen(private val isl: Island) : Screen() {
         list.forEach { a ->
             ui.button("${a.name}: ${counts[a.id] ?: 0} places") {
                 host.show { ChoiceScreen(a.name, null, listOf(
-                    "Places in ${a.name}" to { host.show { MyPlacesScreen(filter = PlaceFilter(islandKey = isl.key, areaId = a.id, label = "${isl.name}, ${a.name}")) } },
+                    "Places in ${a.name}" to { host.show { ChoosePlaceScreen("Places in ${isl.name}, ${a.name}", startIsland = isl, areaId = a.id) } },
                     "Rename" to { host.show { TextInputScreen("Rename area", "Area name", a.name) { n -> A.rename(a, n); host.speak("Saved."); host.back(); host.back() } } },
                     "Move its point to my location" to {
                         val f = g.location.fix

@@ -19,6 +19,9 @@ import mv.haluvi.navigation.net.Http
 import mv.haluvi.navigation.net.OnlinePlace
 
 /**
+ * The one place list of the app. Choosing (for To, From, a route stop or a border): tap = choose.
+ * Managing ([onPick] is null): tap = place options (details, edit, move to another island, delete).
+ *
  * Choose a place (for To or From): where to look (near me, an island, a category), what to search in
  * (places on the phone, offline; OpenStreetMap online; Google online, only with a key), and a search box.
  * On the phone the list follows what you type; online searches start with the Search button.
@@ -27,12 +30,20 @@ import mv.haluvi.navigation.net.OnlinePlace
 class ChoosePlaceScreen(
     private val title: String,
     private val firstChoice: Pair<String, () -> Unit>? = null,
-    private val onPick: (SavedLocation) -> Unit
+    startIsland: Island? = null,
+    /** An area inside the island (for example Hulhumale Phase 2). */
+    private val areaId: String? = null,
+    startSource: String? = null,
+    startCategory: String? = null,
+    private val onPick: ((SavedLocation) -> Unit)? = null
 ) : Screen() {
     private enum class Source { PHONE, OSM, GOOGLE }
 
-    private var island: Island? = null
-    private var category: String? = null
+    private var island: Island? = startIsland
+    private var category: String? = startCategory
+    /** Places from one source only: saved by me, OpenStreetMap, Google, search results. */
+    private var origin: String? = startSource
+    private val choosing: Boolean get() = onPick != null
     private var source = Source.PHONE
     private var query = ""
     private var listBox: LinearLayout? = null
@@ -42,11 +53,11 @@ class ChoosePlaceScreen(
     private var searching = false
     private var limit = 40
 
-    private fun whereText(): String = when {
-        island != null -> "island ${island!!.name}"
-        category != null -> "category ${Categories.name(category)}"
-        else -> "near me"
-    }
+    private fun whereText(): String = listOfNotNull(
+        island?.let { "island ${it.name}" + (areaId?.let { id -> mv.haluvi.navigation.nav.Areas.of(it.key).firstOrNull { a -> a.id == id }?.let { a -> ", ${a.name}" } } ?: "") },
+        category?.let { "category ${Categories.name(it)}" },
+        origin?.let { "from ${sourceName(it)}" }
+    ).joinToString(", ").ifBlank { "near me" }
 
     private fun sourceText(): String = when (source) {
         Source.PHONE -> "on my phone, offline"
@@ -64,11 +75,15 @@ class ChoosePlaceScreen(
         ui.button("Where: ${whereText()}. Change") {
             host.show {
                 ChoiceScreen("Where", null, listOf(
-                    "Near me" to { island = null; category = null; host.backTo(this@ChoosePlaceScreen) },
-                    "By island" to { host.show { AtollPickerScreen { isl -> island = isl; category = null; host.backTo(this@ChoosePlaceScreen) } } },
+                    "Near me, all places" to { island = null; category = null; origin = null; host.backTo(this@ChoosePlaceScreen) },
+                    "By island" to { host.show { AtollPickerScreen { isl -> island = isl; host.backTo(this@ChoosePlaceScreen) } } },
                     "By category" to { host.show { ChoiceScreen("By category", null, Categories.all.filter { it.id != "none" }.map { c ->
-                        c.name to { category = c.id; island = null; host.backTo(this@ChoosePlaceScreen) }
-                    }) } }
+                        "${c.name}: ${g.store.items.count { it.categoryId == c.id }}" to { category = c.id; host.backTo(this@ChoosePlaceScreen) }
+                    }) } },
+                    "By source" to { host.show { ChoiceScreen("By source", null,
+                        listOf(SavedLocation.SOURCE_MANUAL, SavedLocation.SOURCE_OSM_MAP, SavedLocation.SOURCE_GOOGLE, SavedLocation.SOURCE_OSM_SEARCH).map { src ->
+                            "${sourceName(src)}: ${g.store.items.count { it.source == src }}" to { origin = src; source = Source.PHONE; host.backTo(this@ChoosePlaceScreen) }
+                        }) } }
                 ))
             }
         }
@@ -129,23 +144,29 @@ class ChoosePlaceScreen(
                 val text = listOfNotNull(p.name, p.typeText.ifBlank { null }, if (p.distance != null && p.bearing != null)
                     Phrases.where(g.compass.heading, p.bearing!!).removePrefix("at ") + ", " + Phrases.distance(p.distance!!) else null).joinToString(", ")
                 ui.button(text) {
-                    onPick(SavedLocation(SavedLocation.newId(), p.name, p.lat, p.lon,
+                    val loc = SavedLocation(SavedLocation.newId(), p.name, p.lat, p.lon,
                         source = if (p.source == "google") SavedLocation.SOURCE_GOOGLE else SavedLocation.SOURCE_OSM_SEARCH,
-                        categoryId = Categories.guess(p.name + " " + p.typeText), address = p.address, placeId = p.placeId))
+                        categoryId = Categories.guess(p.name + " " + p.typeText), address = p.address, placeId = p.placeId)
+                    val pick = onPick
+                    if (pick != null) pick(loc) else goToPlace(host, loc)
                 }
             }
             return
         }
         val f = g.location.fix
         val cat = category ?: "all"
-        val rows: List<Triple<SavedLocation, Double?, Double?>> = if (f != null)
+        val all: List<Triple<SavedLocation, Double?, Double?>> = if (f != null)
             g.store.nearest(f.lat, f.lon, query, cat, island?.key).map { Triple(it.loc, it.distance, it.bearing) }
         else g.store.filtered(query, cat).filter { island == null || it.islandKey == island!!.key }.map { Triple(it, null, null) }
+        val rows = all.filter { r -> origin == null || r.first.source == origin }
+            .filter { r -> areaId == null || mv.haluvi.navigation.nav.Areas.at(r.first.islandKey, r.first.lat, r.first.lon, r.first.address)?.id == areaId }
         status?.text = (if (rows.isEmpty()) "No places found." else "${rows.size} places, nearest first.") +
             (if (f == null) " Waiting for GPS." else "") +
             (if (rows.isEmpty() && g.store.items.isEmpty()) " Install the built-in map in Settings, Manage islands and places." else "")
         rows.take(limit).forEach { (loc, d, b) ->
-            ui.button(place(loc, d, b), onLong = { host.show { PlaceScreen(loc.id) } }, longLabel = "Place options") { onPick(loc) }
+            val pick = onPick
+            if (pick != null) ui.button(place(loc, d, b), onLong = { host.show { PlaceScreen(loc.id) } }, longLabel = "Place options") { pick(loc) }
+            else ui.button(place(loc, d, b)) { host.show { PlaceScreen(loc.id) } }
         }
         if (rows.size > limit) ui.button("More places") { limit += 40; fill() }
     }

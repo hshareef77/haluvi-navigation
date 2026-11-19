@@ -127,8 +127,7 @@ class RouteEditScreen(private val id: String) : Screen() {
         }
         host.show {
             ChoiceScreen("Add place stop", null, listOf(
-                "My places" to { host.show { MyPlacesScreen(title = "Choose stop") { loc -> pick(loc) } } },
-                "Search" to { PlacePick.handler = pick; host.show { SearchScreen() } },
+                "Choose a place" to { host.show { ChoosePlaceScreen("Choose stop", onPick = pick) } },
                 "What's around me" to { PlacePick.handler = pick; host.show { AroundMeScreen() } },
                 "This location" to {
                     val f = AppGraph.location.fix

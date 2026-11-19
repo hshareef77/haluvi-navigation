@@ -93,7 +93,6 @@ class PlacesScreen : Screen() {
             ui.button("Save ${to.name} to my places") { g.store.add(to); host.speak("Saved."); rebuild() }
         }
         ui.button("Save this place, where I am") { host.show { SavePlaceScreen() } }
-        ui.button("All my places: details, edit, delete") { host.show { MyPlacesScreen() } }
         ui.button("Back") { host.back() }
         return scroll
     }
@@ -106,18 +105,6 @@ class PlacesScreen : Screen() {
     }
 }
 
-/** Where to go: My places, Search, What's around me. */
-class ChooseToScreen : Screen() {
-    override fun create(): View {
-        val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title("To")
-        ui.button("My places") { host.show { MyPlacesScreen(title = "To") { loc -> goToPlace(host, loc) } } }
-        ui.button("Search") { host.show { SearchScreen() } }
-        ui.button("What's around me") { host.show { AroundMeScreen() } }
-        ui.button("Back") { host.back() }
-        return scroll
-    }
-}
 
 /** Islands: sea or air travel between islands. From, To, Travel, Start. */
 class IslandsScreen : Screen() {
@@ -209,26 +196,15 @@ class IslandOutlinesScreen : Screen() {
             else IslandShapeDownloader.summary().message())
         // Show the last message only when it says something the summary above does not.
         if (progress.isNotBlank() && progress != IslandShapeDownloader.summary().message()) ui.info(progress)
-        ui.button(if (g.shapes.isEmpty) "Download" else "Download missing", color = UiColors.BUTTON_ON) { download(full = false) }
         val missing = IslandShapeDownloader.missingNames()
+        // Outlines are built into the app; downloading is only offered when some are missing.
+        if (g.shapes.isEmpty || missing.isNotEmpty()) ui.button(if (g.shapes.isEmpty) "Download" else "Download missing", color = UiColors.BUTTON_ON) { download(full = false) }
         if (missing.isNotEmpty() && !g.shapes.isEmpty) {
             ui.heading("Islands without an outline: ${missing.size}")
             missing.take(50).forEach { ui.info(it) }
         }
         if (!g.shapes.isEmpty) {
             ui.button("Share island report") { share(IslandShapeDownloader.report()) }
-            ui.button("Export outlines file") {
-                host.createFile("haluvi-island-outlines.json", "application/json") { uri ->
-                    if (uri == null) return@createFile
-                    host.scope.launch {
-                        val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            runCatching { host.contentResolver.openOutputStream(uri)?.use { it.write(g.shapes.exportText().toByteArray()) } }.isSuccess
-                        }
-                        host.speak(if (ok) "Exported." else "Export failed.")
-                    }
-                }
-            }
-            ui.button("Download everything again") { download(full = true) }
         }
         ui.button("Back") { host.back() }
         return scroll

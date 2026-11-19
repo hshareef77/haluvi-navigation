@@ -170,7 +170,7 @@ class ExploreScreen : Screen() {
             status = null; road = null; last = null
             ui.info("Speaks your road, intersections and places as you pass them.")
         }
-        if (!ex.hasMapRoads && ex.active) ui.info("For intersections, download the island map in My places.")
+        if (!ex.hasMapRoads && ex.active) ui.info("No roads on this island yet, so intersections are not announced.")
         ui.button("What's around me") { host.show { AroundMeScreen() } }
         ui.button("My roads") { host.show { MyRoadsScreen() } }
         ui.button("Back") { host.back() }

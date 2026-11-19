@@ -18,93 +18,11 @@ import mv.haluvi.navigation.nav.Phrases
 import mv.haluvi.navigation.net.Http
 import mv.haluvi.navigation.net.OnlinePlace
 
-/**
- * Saved and downloaded places, nearest first.
- * With [onPick] it is a chooser (tap = choose); without it, it manages places (tap = place options).
- */
-/** Which places to show: one island, one source (saved by me, offline map, Google) or one category. */
-data class PlaceFilter(val islandKey: String? = null, val source: String? = null, val category: String? = null, val label: String = "",
-                       /** An area inside the island (for example Hulhumalé Phase 2). */
-                       val areaId: String? = null)
-
 fun sourceName(source: String): String = when (source) {
     SavedLocation.SOURCE_MANUAL -> "Saved by me"
-    SavedLocation.SOURCE_OSM_MAP -> "Offline map"
+    SavedLocation.SOURCE_OSM_MAP -> "OpenStreetMap"
     SavedLocation.SOURCE_GOOGLE -> "Google"
     else -> "Search results"
-}
-
-class MyPlacesScreen(
-    private val title: String = "My places",
-    private val firstChoice: Pair<String, () -> Unit>? = null,
-    private val filter: PlaceFilter? = null,
-    private val onPick: ((SavedLocation) -> Unit)? = null
-) : Screen() {
-    private val forGoTo: Boolean get() = onPick != null
-    private var query = ""
-    private var limit = 40
-
-    override fun create(): View {
-        val g = AppGraph
-        val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title(if (filter != null) "$title: ${filter.label}" else title)
-        firstChoice?.let { (label, action) -> ui.button(label) { action() } }
-        if (!forGoTo && filter == null) {
-            ui.button("Save this place") { host.show { SavePlaceScreen() } }
-            ui.button("Manage islands and places") { host.show { ManageScreen() } }
-        }
-        if (filter == null) ui.button("Show: near me. Change") { chooseView() }
-        else filter.islandKey?.let { key -> g.islands.byKey(key) ?: g.shapes.extras.firstOrNull { it.key == key } }?.let { isl ->
-            if (!forGoTo) ui.button("Island details") { host.show { IslandDetailsScreen(isl) } }
-        }
-        val edit = ui.edit("Find in my places", query) { query = it.trim(); limit = 40; rebuild() }
-        ui.row("Find" to { query = edit.text.toString().trim(); limit = 40; rebuild() }, "Clear" to { query = ""; rebuild() })
-
-        // Nearest first (also when choosing where to go); by name only while there is no position at all.
-        val f = g.location.fix
-        val cat = filter?.category ?: "all"
-        val all: List<Triple<SavedLocation, Double?, Double?>> = if (f != null)
-            g.store.nearest(f.lat, f.lon, query, cat, filter?.islandKey).map { Triple(it.loc, it.distance, it.bearing) }
-        else g.store.filtered(query, cat).filter { filter?.islandKey == null || it.islandKey == filter.islandKey }.map { Triple(it, null, null) }
-        val rows = all.filter { filter?.source == null || it.first.source == filter.source }
-            .filter { r -> filter?.areaId == null || mv.haluvi.navigation.nav.Areas.at(r.first.islandKey, r.first.lat, r.first.lon, r.first.address)?.id == filter.areaId }
-        if (f == null) ui.info("Waiting for GPS: sorted by name.")
-        ui.info("${rows.size} places.")
-        if (rows.isEmpty()) ui.info(if (g.store.items.isEmpty()) "No places yet. Save this place, or download the island map." else "No places found.")
-        rows.take(limit).forEach { (loc, d, b) ->
-            val text = if (d != null && b != null) Phrases.place(loc.name, g.compass.heading, b, d) else loc.name
-            ui.button(text) {
-                val pick = onPick
-                if (pick != null) pick(loc) else host.show { PlaceScreen(loc.id) }
-            }
-        }
-        if (rows.size > limit) ui.button("More places") { limit += 40; rebuild() }
-        ui.button("Back") { host.back() }
-        return scroll
-    }
-
-    /** Near me, by island, by source or by category. Keeps choosing mode ([onPick]) and the title. */
-    private fun chooseView() {
-        val g = AppGraph
-        fun open(fl: PlaceFilter) { host.show { MyPlacesScreen(title, null, fl, onPick) } }
-        host.show {
-            ChoiceScreen("Show places", null, listOf(
-                "Near me" to { host.back() },
-                "By island" to { host.show { AtollPickerScreen { isl ->
-                    host.backTo(this@MyPlacesScreen); open(PlaceFilter(islandKey = isl.key, label = isl.name))
-                } } },
-                "By source" to { host.show { ChoiceScreen("By source", null,
-                    listOf(SavedLocation.SOURCE_MANUAL, SavedLocation.SOURCE_OSM_MAP, SavedLocation.SOURCE_GOOGLE, SavedLocation.SOURCE_OSM_SEARCH).map { src ->
-                        "${sourceName(src)}: ${g.store.items.count { it.source == src }}" to { host.backTo(this@MyPlacesScreen); open(PlaceFilter(source = src, label = sourceName(src))) }
-                    }) } },
-                "By category" to { host.show { ChoiceScreen("By category", null,
-                    Categories.all.map { c ->
-                        "${c.name}: ${g.store.items.count { it.categoryId == c.id }}" to { host.backTo(this@MyPlacesScreen); open(PlaceFilter(category = c.id, label = c.name)) }
-                    }) } }
-            ))
-        }
-    }
-
 }
 
 private var importedExtras = 0
@@ -343,96 +261,6 @@ class EditPlaceScreen(private val id: String) : Screen() {
     }
 }
 
-/** Online search. Uses Google when a key is set, otherwise (or if Google fails) OpenStreetMap. */
-class SearchScreen : Screen() {
-    /** Island to search on; null = the island I am on. */
-    private var area: Island? = null
-    private var query = ""
-    private var results: List<OnlinePlace> = emptyList()
-    private var searching = false
-    private var job: Job? = null
-    private var message = ""
-
-    override fun create(): View {
-        val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title("Search")
-        ui.button("Search in: " + (area?.let { if (it.type == "inhabited") it.fullName else it.spokenName } ?: "my island")) {
-            host.show {
-                ChoiceScreen("Search in", null, listOf(
-                    "My island" to { area = null; host.backTo(this@SearchScreen) },
-                    "Choose island" to { host.show { AtollPickerScreen { isl -> area = isl; host.say("Search in ${isl.name}"); host.backTo(this@SearchScreen) } } }
-                ))
-            }
-        }
-        val edit = ui.edit("Place name", query) { search(it) }
-        ui.button("Search") { search(edit.text.toString()) }
-        ui.row("Mosque" to { search("mosque") }, "Health" to { search("hospital clinic pharmacy") }, "Shop" to { search("shop supermarket") })
-        ui.row("Food" to { search("restaurant cafe") }, "Ferry" to { search("ferry terminal harbor jetty") })
-        when {
-            searching -> ui.info("Searching for $query.")
-            message.isNotBlank() -> ui.info(message)
-        }
-        val g = AppGraph
-        results.forEach { p ->
-            val text = if (p.distance != null && p.bearing != null) Phrases.place(p.name, g.compass.heading, p.bearing!!, p.distance!!) else p.name
-            ui.button(text) {
-                val loc = SavedLocation(SavedLocation.newId(), p.name, p.lat, p.lon,
-                    source = if (p.source == "google") SavedLocation.SOURCE_GOOGLE else SavedLocation.SOURCE_OSM_SEARCH,
-                    categoryId = Categories.guess(p.name + " " + p.typeText), address = p.address, placeId = p.placeId)
-                goToPlace(host, loc)
-            }
-        }
-        ui.button("Back") { host.back() }
-        return scroll
-    }
-
-    private fun search(text: String) {
-        val q = text.trim()
-        if (q.isEmpty()) { host.speak("Please type a place name."); return }
-        query = q; searching = true; message = ""; results = emptyList()
-        rebuild()
-        host.speak("Searching.")
-        val g = AppGraph
-        val f = g.location.fix
-        val chosen = area
-        // Search centre: the chosen island, or my position.
-        val cLat = chosen?.lat ?: f?.lat
-        val cLon = chosen?.lon ?: f?.lon
-        val island = chosen?.name ?: f?.let { g.islands.nearest(it.lat, it.lon)?.island?.name }
-        job?.cancel()
-        job = host.scope.launch {
-            val list = withContext(Dispatchers.IO) {
-                // Google (online, with a key) and OpenStreetMap together, without duplicates.
-                val out = LinkedHashMap<String, OnlinePlace>()
-                var err: Throwable? = null
-                if (g.settings.googleReady) {
-                    val gq = if (island != null) "$q, $island, Maldives" else "$q, Maldives"
-                    runCatching { g.google.searchText(gq, cLat, cLon, if (chosen != null) 3000 else 5000) }
-                        .onSuccess { l -> l.forEach { out.putIfAbsent(it.key, it) } }.onFailure { err = it }
-                }
-                runCatching { g.osm.search(q, cLat, cLon, island, wide = false) }
-                    .onSuccess { l -> l.forEach { p -> if (out.values.none { o -> o.name.equals(p.name, true) && Geo.distance(o.lat, o.lon, p.lat, p.lon) < 50 }) out.putIfAbsent(p.key, p) } }
-                    .onFailure { if (out.isEmpty() && err == null) err = it }
-                out.values.toList() to (if (out.isEmpty()) err else null)
-            }
-            searching = false
-            val (places, err) = list
-            if (f != null) places.forEach { it.distance = Geo.distance(f.lat, f.lon, it.lat, it.lon); it.bearing = Geo.bearing(f.lat, f.lon, it.lat, it.lon) }
-            results = places.sortedBy { it.distance ?: 0.0 }.take(30)
-            message = when {
-                results.isNotEmpty() -> "${results.size} places found."
-                err != null -> Http.friendly(err!!, "Search")
-                else -> "Nothing found."
-            }
-            host.speak(message)
-            if (host.currentScreen() === this@SearchScreen) rebuild()
-        }
-    }
-
-    override fun onDispose() { if (searching) { job?.cancel(); searching = false } }
-}
-
-/** Atolls, with island name search. */
 class AtollPickerScreen(private val onPick: (Island) -> Unit) : Screen() {
     private var query = ""
     override fun create(): View {
@@ -454,7 +282,6 @@ class AtollPickerScreen(private val onPick: (Island) -> Unit) : Screen() {
             ui.heading("More")
         }
         ui.button("Airports") { host.show { AirportsScreen(onPick) } }
-        if (g.shapes.extras.isNotEmpty()) ui.button("Resorts and other islands nearby") { host.show { OtherIslandsScreen(onPick) } }
         ui.heading("Atolls")
         g.islands.atolls.forEach { a -> ui.button(atollLabel(a)) { host.show { IslandPickerScreen(a, onPick) } } }
         ui.button("Back") { host.back() }
@@ -511,21 +338,6 @@ object GoogleSearchedDates {
             dates.size < islands.size -> "last Google search ${dateText(dates.max())} (${dates.size} of ${islands.size} islands)"
             else -> "last Google search ${dateText(dates.max())}"
         }
-    }
-}
-
-/** Nearest resorts, airports and uninhabited named islands (from the downloaded outlines). */
-class OtherIslandsScreen(private val onPick: (Island) -> Unit) : Screen() {
-    override fun create(): View {
-        val g = AppGraph
-        val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title("Resorts, airports and other islands")
-        val f = g.location.fix
-        val list = if (f != null) g.shapes.extras.sortedBy { Geo.distance(f.lat, f.lon, it.lat, it.lon) } else g.shapes.extras.sortedBy { it.name }
-        if (list.isEmpty()) ui.info("None yet. Download island outlines first.")
-        list.take(40).forEach { isl -> ui.button(islandLabel(isl)) { onPick(isl) } }
-        ui.button("Back") { host.back() }
-        return scroll
     }
 }
 
