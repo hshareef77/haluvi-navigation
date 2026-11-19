@@ -37,6 +37,8 @@ class Settings(context: Context) {
     var routeAnnounceAll by bool("routeAnnounceAll", true)
     /** The first-start guide was finished. */
     var guideDone by bool("guideDone", false)
+    /** Date of the built-in maps last installed on this phone (so a newer app version updates them). */
+    var builtinInstalledDate by string("builtinInstalledDate", "")
     /** Joined islands: the one-time re-check of saved places was done (1). */
     var joinedRecheckVersion by int("joinedRecheckVersion", 0)
     var joinedRecheckMessage by string("joinedRecheckMessage", "")

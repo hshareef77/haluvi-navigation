@@ -94,10 +94,13 @@ object OfflineMaps {
         try {
             val byAtoll = islands.filter { it.atollIndex >= 0 }.groupBy { it.atollIndex }
             var step = 0
-            for ((ai, group) in byAtoll) {
+            for ((ai, inhabited) in byAtoll) {
                 currentCoroutineContext().ensureActive()
                 step++
                 val atoll = g.islands.atolls[ai]
+                // Built-in maps cover the whole atoll, so resorts, airports and other islands get their places
+                // and roads too (when the whole atoll is installed).
+                val group = if (builtin && inhabited.size == atoll.islands.size) inhabited + extrasOf(atoll) else inhabited
                 val prefix = if (byAtoll.size > 1) "Atoll $step of ${byAtoll.size}: " else ""
                 // 1. Island outlines for this atoll (needed to put places and roads on the right island).
                 // Outlines are replaced only when the new download succeeds (old ones keep working meanwhile).
@@ -227,6 +230,17 @@ object OfflineMaps {
             if (shore > 500) return null
         }
         return best
+    }
+
+    /** Airports, resorts and other islands of an atoll (by their nearest inhabited island, within 40 km). */
+    fun extrasOf(a: mv.haluvi.navigation.data.Atoll): List<Island> = AppGraph.shapes.extras.filter { e ->
+        AppGraph.islands.nearest(e.lat, e.lon)?.takeIf { it.distance <= 40_000 }?.island?.atollIndex == a.index
+    }
+
+    /** Marks islands as having an offline map (used after importing a map file). */
+    fun markImported(keys: Collection<String>, roadsBy: Map<String, Int>) {
+        keys.forEach { k -> statuses()[k] = Status(System.currentTimeMillis(), AppGraph.store.countDownloadedForIsland(k), roadsBy[k] ?: 0) }
+        saveStatuses()
     }
 
     /** Removes downloaded places and roads of [islands]. */

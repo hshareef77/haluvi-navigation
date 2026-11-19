@@ -11,8 +11,8 @@ android {
         applicationId = "mv.haluvi.navigation"
         minSdk = 26
         targetSdk = 35
-        versionCode = 24
-        versionName = "3.8.1"
+        versionCode = 25
+        versionName = "3.9"
     }
 
     val keyStorePath = System.getenv("ANDROID_KEYSTORE_PATH")

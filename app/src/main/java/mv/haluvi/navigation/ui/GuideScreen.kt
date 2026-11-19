@@ -35,15 +35,13 @@ class GuideScreen : Screen() {
                 titleView = ui.title("Step 3 of 4: Map of your island")
                 info = ui.info(mapText())
                 val mine = OfflineMaps.myIsland()
-                val code = mine?.let { g.islands.atolls.getOrNull(it.atollIndex)?.code }
                 when {
-                    mine == null -> ui.button("Next", color = UiColors.BUTTON_ON) { step = 4; rebuild() }
-                    OfflineMaps.status(mine.key) != null -> ui.button("Next", color = UiColors.BUTTON_ON) { step = 4; rebuild() }
-                    code != null && BuiltinMaps.has(code) -> {
-                        // Built into the app: install it straight away, no internet needed.
-                        if (!mapStarted && !OfflineDownload.active) { mapStarted = true; scroll.post { startOfflineDownload(host, listOf(mine), mine.name, builtin = true) } }
+                    BuiltinMaps.date() != null -> {
+                        // Built into the app: install all islands straight away, no internet needed.
+                        if (!mapStarted) { mapStarted = true; scroll.post { host.installBuiltinMapsIfNew(quiet = false) } }
                         ui.button("Next", color = UiColors.BUTTON_ON) { step = 4; rebuild() }
                     }
+                    mine == null || OfflineMaps.status(mine.key) != null -> ui.button("Next", color = UiColors.BUTTON_ON) { step = 4; rebuild() }
                     else -> {
                         ui.button("Download", color = UiColors.BUTTON_ON) { startOfflineDownload(host, listOf(mine), mine.name); step = 4; rebuild() }
                         ui.button("Later") { step = 4; rebuild() }
@@ -67,12 +65,16 @@ class GuideScreen : Screen() {
 
     private fun mapText(): String {
         val g = AppGraph
-        val mine = OfflineMaps.myIsland() ?: return "Your island is not known yet. You can get maps later in Settings, Manage islands and places."
-        val name = mine.fullName
-        if (OfflineMaps.status(mine.key) != null) return "The map of $name is ready. It works without internet."
-        val code = g.islands.atolls.getOrNull(mine.atollIndex)?.code
-        if (code != null && BuiltinMaps.has(code)) return if (OfflineDownload.active) "Preparing the map of $name. One moment." else "The map of $name is ready. It works without internet."
-        return "Download the free map of $name? Roads and places, for directions without internet. Takes about 1 minute."
+        val mine = OfflineMaps.myIsland()
+        if (BuiltinMaps.date() != null) {
+            if (OfflineDownload.active) return "Preparing the maps of all islands. One moment, no internet needed."
+            if (g.settings.builtinInstalledDate == BuiltinMaps.date())
+                return "The maps of all islands are ready" + (mine?.let { ", also for ${it.fullName}" } ?: "") + ". They work without internet."
+            return "Preparing the maps of all islands."
+        }
+        if (mine == null) return "Your island is not known yet. You can get maps later in Settings, Manage islands and places."
+        if (OfflineMaps.status(mine.key) != null) return "The map of ${mine.fullName} is ready. It works without internet."
+        return "Download the free map of ${mine.fullName}? Roads and places, for directions without internet. Takes about 1 minute."
     }
 
     override fun onSecond() { if (step == 3) info?.text = mapText() }

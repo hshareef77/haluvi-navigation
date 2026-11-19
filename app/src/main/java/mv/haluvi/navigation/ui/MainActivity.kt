@@ -63,7 +63,10 @@ class MainActivity : Activity() {
         AppGraph.nav.addListener(liveListener)
         AppGraph.explore.addListener(liveListener)
         showHome()
-        if (!AppGraph.settings.guideDone) show { GuideScreen() } else requestPermissionsIfNeeded()
+        if (!AppGraph.settings.guideDone) show { GuideScreen() } else {
+            requestPermissionsIfNeeded()
+            installBuiltinMapsIfNew()
+        }
         if (AppGraph.settings.islandAlertsOn) mv.haluvi.navigation.nav.NavigationService.ensureRunning(this)
         // Keep saved Google places within Google's terms (positions refreshed from place IDs).
         if (AppGraph.settings.googleReady) scope.launch { runCatching { mv.haluvi.navigation.nav.GooglePlaceRefresh.run() } }
@@ -136,6 +139,15 @@ class MainActivity : Activity() {
     }
 
     /** Clears the stack and shows the Home screen. */
+    /** Installs the built-in maps of all islands when this app version has newer ones (no internet needed). */
+    fun installBuiltinMapsIfNew(quiet: Boolean = true) {
+        val date = mv.haluvi.navigation.nav.BuiltinMaps.date() ?: return
+        if (AppGraph.settings.builtinInstalledDate == date || OfflineDownload.active) return
+        startOfflineDownload(this, AppGraph.islands.allIslands, "the whole Maldives", builtin = true, quiet = quiet) { ok ->
+            if (ok) AppGraph.settings.builtinInstalledDate = date
+        }
+    }
+
     fun showHome() {
         stack.clear()
         show { HomeScreen() }

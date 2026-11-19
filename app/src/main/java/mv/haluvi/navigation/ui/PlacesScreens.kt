@@ -108,6 +108,7 @@ class MyPlacesScreen(
 }
 
 private var importedExtras = 0
+private var importedRoadIslands = 0
 
 /** Import a backup file: places, road names, routes, borders, areas and island changes. */
 fun importBackup(host: MainActivity) {
@@ -117,6 +118,7 @@ fun importBackup(host: MainActivity) {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val text = host.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+                    importedRoadIslands = 0; importedExtras = 0
                     val places = AppGraph.store.import(text)
                     val root = runCatching { org.json.JSONObject(text.trim()) }.getOrNull()
                     val routes = runCatching { root?.optJSONArray("routes")?.let { AppGraph.routes.import(it) } }.getOrNull()
@@ -125,6 +127,15 @@ fun importBackup(host: MainActivity) {
                     runCatching { root?.optJSONObject("islandChanges")?.let { extra += mv.haluvi.navigation.data.IslandOverrides.importJson(it, AppGraph.islands.allIslands + AppGraph.shapes.extras) } }
                     runCatching { root?.optJSONArray("areas")?.let { extra += mv.haluvi.navigation.nav.Areas.importJson(it) } }
                     runCatching { root?.optJSONObject("borders")?.let { extra += mv.haluvi.navigation.nav.JoinedIslands.importJson(it) } }
+                    // Downloaded roads per island: added only where the island has none yet (nothing is replaced).
+                    runCatching {
+                        root?.optJSONObject("osmRoads")?.let { o ->
+                            val done = HashMap<String, Int>()
+                            o.keys().forEach { k -> val arr = o.getJSONArray(k); if (AppGraph.store.importRoadsJson(k, arr)) done[k] = arr.length() }
+                            if (done.isNotEmpty()) { mv.haluvi.navigation.nav.OfflineMaps.markImported(done.keys, done); mv.haluvi.navigation.nav.RoadDetector.version++ }
+                            importedRoadIslands = done.size
+                        }
+                    }
                     if (extra > 0) runCatching { mv.haluvi.navigation.nav.JoinedIslands.recheckAll() }
                     Triple(places, AppGraph.store.lastImportedRoadNames, routes).also { importedExtras = extra }
                 }
@@ -135,6 +146,7 @@ fun importBackup(host: MainActivity) {
                 host.speak("$added places imported." + (if (skipped > 0) " $skipped already saved." else "") +
                     (if (roads > 0) " $roads road names imported." else "") +
                     (routes?.let { (ra, rs) -> (if (ra > 0) " $ra routes imported." else "") + (if (rs > 0) " $rs routes already saved." else "") } ?: "") +
+                    (if (importedRoadIslands > 0) " Roads of $importedRoadIslands islands added." else "") +
                     (if (importedExtras > 0) " Borders, areas and island changes restored." else ""))
                 host.rebuild()
             }.onFailure { host.speak("This file could not be imported.") }
@@ -142,21 +154,48 @@ fun importBackup(host: MainActivity) {
     }
 }
 
-fun exportBackup(host: MainActivity) {
-    host.createFile("haluvi-backup.json", "application/json") { uri ->
+/**
+ * Export. Without [share]: a full backup for your own phone (everything, also Google places and roads).
+ * With [share]: a map to share with others for those islands: OpenStreetMap places and roads, places you saved
+ * yourself, road names, recorded roads, routes, borders, areas and island changes. Google places are left out,
+ * because Google's terms do not allow sharing them.
+ */
+fun exportBackup(host: MainActivity, share: List<Island>? = null, label: String = "") {
+    val fileName = if (share == null) "haluvi-backup.json" else "haluvi-map-" + label.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-') + ".json"
+    host.createFile(fileName, "application/json") { uri ->
         if (uri == null) return@createFile
         host.scope.launch {
-            val ok = withContext(Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val json = org.json.JSONObject(AppGraph.store.exportJson()).put("routes", AppGraph.routes.exportJson())
+                    val g = AppGraph
+                    val allIslands = g.islands.allIslands + g.shapes.extras
+                    val keys = (share ?: allIslands).map { it.key }.toSet()
+                    val root = if (share == null) org.json.JSONObject(g.store.exportJson()) else {
+                        val arr = org.json.JSONArray()
+                        g.store.items.filter { it.islandKey in keys && it.source != SavedLocation.SOURCE_GOOGLE }.forEach { arr.put(it.toJson()) }
+                        val names = org.json.JSONArray()
+                        val all = g.store.roadNames.exportJson()
+                        for (i in 0 until all.length()) { val o = all.getJSONObject(i); if (o.optString("island") in keys) names.put(o) }
+                        org.json.JSONObject().put("app", "Haluvi Navigation").put("version", 2).put("locations", arr).put("roadNames", names)
+                    }
+                    root.put("kind", if (share == null) "full" else "share")
+                    // Downloaded (OpenStreetMap) roads per island.
+                    val roads = org.json.JSONObject()
+                    var roadIslands = 0
+                    for (k in keys) g.store.roadsJson(k)?.takeIf { it.length() > 0 }?.let { roads.put(k, it); roadIslands++ }
+                    root.put("osmRoads", roads)
+                    root.put("routes", g.routes.exportJson())
                         .put("borders", mv.haluvi.navigation.nav.JoinedIslands.exportJson())
                         .put("areas", mv.haluvi.navigation.nav.Areas.exportJson())
                         .put("islandChanges", mv.haluvi.navigation.data.IslandOverrides.exportJson())
-                        .toString(2)
-                    host.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
-                }.isSuccess
+                    host.contentResolver.openOutputStream(uri)?.use { it.write(root.toString().toByteArray()) }
+                    root.getJSONArray("locations").length() to roadIslands
+                }
             }
-            host.speak(if (ok) "Exported: places, roads, routes, borders, areas and island changes." else "Export failed.")
+            result.onSuccess { (places, roadIslands) ->
+                host.speak((if (share == null) "Full backup saved: " else "Map to share saved: ") + "$places places, roads of $roadIslands islands, road names, routes, borders, areas and island changes." +
+                    if (share != null) " Google places are not included." else "")
+            }.onFailure { host.speak("Export failed.") }
         }
     }
 }
@@ -444,10 +483,7 @@ fun atollLabel(a: Atoll): String {
     return "${a.fullName}, ${islandsText(a.islands.size)}, ${offlinePlacesText(a.islands.sumOf { counts[it.key] ?: 0 })}$roads"
 }
 
-/** Airports, resorts and other islands of an atoll (by their nearest inhabited island, within 40 km). */
-fun extrasOfAtoll(a: Atoll): List<Island> = AppGraph.shapes.extras.filter { e ->
-    AppGraph.islands.nearest(e.lat, e.lon)?.takeIf { it.distance <= 40_000 }?.island?.atollIndex == a.index
-}
+fun extrasOfAtoll(a: Atoll): List<Island> = mv.haluvi.navigation.nav.OfflineMaps.extrasOf(a)
 
 fun islandsText(n: Int) = if (n == 1) "1 island" else "$n islands"
 

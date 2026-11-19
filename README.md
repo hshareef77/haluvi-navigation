@@ -7,7 +7,8 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
 - **Home**: Where am I, Places, Islands, Routes, Explore, Settings. A short first-start guide (location, map of
   your island, optional Google key).
 - **Built-in maps**: OpenStreetMap roads and places for every atoll are built into the app; installing them
-  needs no internet (Settings, Manage islands and places). Downloading the newest from the internet still works.
+  are installed automatically (first-start guide, and after an update with newer maps), also for resorts, airports
+  and other islands; no internet needed. Downloading the newest from the internet still works.
 - **Places** (walking or driving): From and To (swap), Travel, Start. Choose a place: Where (near me, an island,
   a category), Search in (on my phone offline, OpenStreetMap online, Google online only with a key), a search
   box that filters as you type; tap to choose, actions menu for place options.
@@ -55,7 +56,10 @@ It replaces the earlier Android Lua "Navigating Assistant" app and keeps all of 
 - **Get Google places** retries failed searches, searches crowded spots down to 20 m and says whether the
   search is complete. Before searching it shows what is already saved, when each island was last searched,
   and an estimate of the Google searches; during the search, new and already saved places.
-- **Backup** holds places, roads, routes, borders, areas and island changes.
+- **Backup and sharing**: Full backup for your own phone (everything, also Google places and roads); Map to share
+  with others for an island, an atoll or the whole Maldives (OpenStreetMap places and roads, your own places, road
+  names, recorded roads, routes, borders, areas, island changes; Google places are left out as Google requires);
+  Import adds what is new and never deletes anything.
 - **Places / Islands**: one From button that follows you ("From: my location, at Daily Print, on Ameenee
   Magu, Faafu Feeali"; "From: my island, Faafu Feeali, by GPS" or "at sea, 2 km from …") and a To button
   with distance and direction.

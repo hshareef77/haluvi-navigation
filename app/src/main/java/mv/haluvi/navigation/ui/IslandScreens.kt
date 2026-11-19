@@ -57,9 +57,21 @@ class ManageScreen : Screen() {
             }
         }
         ui.button("My roads: ${g.store.roadNames.all().size}") { host.show { MyRoadsScreen() } }
-        ui.heading("Backup")
-        ui.button("Export backup: places, roads and routes") { exportBackup(host) }
-        ui.button("Import backup") { importBackup(host) }
+        ui.heading("Backup and sharing")
+        ui.button("Full backup, for my own phone") { exportBackup(host) }
+        ui.button("Map to share with others") {
+            val choose: (List<Island>, String) -> Unit = { list, label -> host.backTo(this@ManageScreen); exportBackup(host, list, label) }
+            host.show { ChoiceScreen("Map to share", "Google places are not included: Google does not allow sharing them. Each person can get their own with their own key.", listOfNotNull(
+                mv.haluvi.navigation.nav.OfflineMaps.myIsland()?.let { mine -> "My island: ${mine.name}" to { choose(listOf(mine), mine.name) } },
+                "Choose atoll" to { host.show { ChoiceScreen("Choose atoll", null, g.islands.atolls.map { a ->
+                    atollLabel(a) to { choose(a.islands + mv.haluvi.navigation.nav.OfflineMaps.extrasOf(a), a.fullName) }
+                }) } },
+                "Choose island" to { host.show { AtollPickerScreen { isl -> choose(listOf(isl), isl.name) } } },
+                "Whole Maldives" to { choose(g.islands.allIslands + g.shapes.extras, "Maldives") }
+            )) }
+        }
+        ui.button("Import a backup or a shared map") { importBackup(host) }
+        ui.info("Import adds what is new and never deletes what you have.")
         ui.heading("Advanced")
         ui.button("Joined islands and borders") { host.show { JoinedIslandsScreen() } }
         ui.button("Island outlines details") { host.show { IslandOutlinesScreen() } }

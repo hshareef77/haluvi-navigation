@@ -36,11 +36,12 @@ fun shareText(host: MainActivity, subject: String, text: String) {
 }
 
 /** Starts a download of [islands] and shows progress on whatever Offline maps screen is open. */
-fun startOfflineDownload(host: MainActivity, islands: List<Island>, label: String, builtin: Boolean = false) {
+fun startOfflineDownload(host: MainActivity, islands: List<Island>, label: String, builtin: Boolean = false,
+                         quiet: Boolean = false, onFinished: ((ok: Boolean) -> Unit)? = null) {
     if (OfflineDownload.active) { host.speak("A download is already running."); return }
     OfflineDownload.progress = "Starting: $label."
     OfflineDownload.running = true
-    host.speak(if (builtin) "Installing the built-in map of $label." else "Downloading $label.")
+    if (!quiet) host.speak(if (builtin) "Installing the built-in map of $label." else "Downloading $label.")
     OfflineDownload.job = host.scope.launch {
         var stopped = false
         val msg = try {
@@ -58,7 +59,8 @@ fun startOfflineDownload(host: MainActivity, islands: List<Island>, label: Strin
         OfflineDownload.lastResult = "$head at $time, $label. $msg"
         OfflineDownload.progress = ""
         OfflineDownload.running = false
-        host.speak("$head. $msg")
+        if (!quiet || failed) host.speak("$head. $msg") else host.speak("$head.")
+        onFinished?.invoke(!failed && !stopped)
         (host.currentScreen() as? OfflineProgressView)?.let { (it as Screen).rebuild() }
     }
     // Never left "running" by an unexpected error.
@@ -88,14 +90,14 @@ class OfflineMapsScreen : Screen(), OfflineProgressView {
         if (OfflineDownload.lastResult.isNotBlank()) ui.info(OfflineDownload.lastResult)
 
         mv.haluvi.navigation.nav.BuiltinMaps.date()?.let { d ->
-            ui.heading("Built-in maps: no internet needed")
-            ui.info("OpenStreetMap roads and places built into the app (from $d).")
-            OfflineMaps.myIsland()?.let { mine ->
-                ui.button("Install for my island: ${mine.name}", color = UiColors.BUTTON_ON) { startOfflineDownload(host, listOf(mine), mine.name, builtin = true) }
-            }
-            ui.button("Install for all islands") {
-                host.show { ConfirmScreen("Install the built-in map of all ${g.islands.allIslands.size} islands? No internet needed; it takes a minute or two.", "Install all") {
-                    host.backTo(this@OfflineMapsScreen); startOfflineDownload(host, g.islands.allIslands, "the whole Maldives", builtin = true)
+            ui.heading("Built-in maps: installed automatically")
+            ui.info(if (g.settings.builtinInstalledDate == d) "OpenStreetMap roads and places from $d are installed for all islands, also resorts and airports. No internet needed."
+                else "OpenStreetMap roads and places from $d are built into the app. They are installed automatically when the app starts.")
+            ui.button("Re-install for an atoll or island") { host.show { AtollsScreen() } }
+            ui.button("Re-install for all islands") {
+                host.show { ConfirmScreen("Re-install the built-in maps of all islands? No internet needed; it takes a minute or two. Google places and your own places are kept.", "Re-install") {
+                    host.backTo(this@OfflineMapsScreen)
+                    startOfflineDownload(host, g.islands.allIslands, "the whole Maldives", builtin = true) { ok -> if (ok) g.settings.builtinInstalledDate = d }
                 } }
             }
         }

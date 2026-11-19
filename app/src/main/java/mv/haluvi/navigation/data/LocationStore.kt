@@ -263,6 +263,22 @@ class LocationStore(private val context: Context, private val islands: IslandRep
         File(roadsDir, safeName(islandKey) + ".json").writeText(arr.toString())
     }
 
+    /** Keys of islands with downloaded roads. */
+    fun roadIslandKeys(): List<String> = roadsDir.listFiles()?.map { it.name.removeSuffix(".json") }.orEmpty()
+
+    /** The downloaded roads file of an island as stored (without your road names), for backups and sharing. */
+    fun roadsJson(islandKey: String): JSONArray? {
+        val f = File(roadsDir, safeName(islandKey) + ".json")
+        return if (f.exists()) runCatching { JSONArray(f.readText()) }.getOrNull() else null
+    }
+
+    /** Restores an island's downloaded roads from a backup, only when the island has none. Returns true when saved. */
+    fun importRoadsJson(islandKey: String, arr: JSONArray): Boolean {
+        val f = File(roadsDir, safeName(islandKey) + ".json")
+        if (f.exists() && runCatching { JSONArray(f.readText()).length() }.getOrDefault(0) > 0) return false
+        f.writeText(arr.toString()); return true
+    }
+
     fun loadRoads(islandKey: String): List<DownloadedRoad> {
         val f = File(roadsDir, safeName(islandKey) + ".json")
         if (!f.exists()) return emptyList()
