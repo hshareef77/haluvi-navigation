@@ -25,7 +25,11 @@ class HomeScreen : Screen() {
         ui.button("Where am I") { whereAmI(host) }
         ui.button("Places") { host.show { PlacesScreen() } }
         ui.button("Islands") { host.show { IslandsScreen() } }
-        ui.button("Routes" + (g.routeTrip.activeRouteName?.let { ", travelling: $it" } ?: "")) { host.show { RoutesScreen() } }
+        ui.button("Routes" + (g.routeTrip.activeRouteName?.let { ", travelling: $it" } ?: "")) {
+            // While riding, Routes opens the ride; Back from it shows the routes list.
+            host.show { RoutesScreen() }
+            if (g.routeTrip.active) host.show { RouteTripScreen() }
+        }
         ui.button(if (g.explore.active) "Explore, running" else "Explore") { host.show { ExploreScreen() } }
         ui.button("Settings") { host.show { SettingsScreen() } }
         return scroll

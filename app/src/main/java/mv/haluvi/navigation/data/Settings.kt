@@ -44,6 +44,11 @@ class Settings(context: Context) {
     var joinedRecheckMessage by string("joinedRecheckMessage", "")
     /** Routes: "Your stop is coming" this many metres before a place stop. */
     var routeWarnMeters by int("routeWarnMeters", 200)
+    /** Routes screen: "bus", "ferry" or "mine", and the filter of each type. */
+    var routeType by string("routeType", "bus")
+    var routeFilterBus by string("routeFilterBus", "all")
+    var routeFilterFerry by string("routeFilterFerry", "all")
+    var routeFilterMine by string("routeFilterMine", "all")
     /** "Approaching / Arrived at / Passing" island announcements during island trips and Explore at sea. */
     var islandStopAnnouncementsOn by bool("islandStopAnnouncementsOn", true)
     /** Background island alerts: announcements and notifications at sea without opening the app. */

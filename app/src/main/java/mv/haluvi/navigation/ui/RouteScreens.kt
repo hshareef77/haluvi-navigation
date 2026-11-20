@@ -28,40 +28,6 @@ class TextInputScreen(private val title: String, private val label: String, priv
 
 private fun stopLabel(i: Int, s: RouteStop) = "${i + 1}. ${s.name}" + if (s.isIsland) ", island" else ""
 
-/** Routes: travel with a route, make one, record one while riding. */
-class RoutesScreen : Screen() {
-    override fun create(): View {
-        val g = AppGraph
-        val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title("Routes")
-        PlacePick.handler = null
-        g.routeTrip.route?.let { r -> ui.button("Travelling: ${r.name}. Open", color = UiColors.BUTTON_ON) { host.show { RouteTripScreen() } } }
-        if (g.routeRecorder.active) ui.button("Recording: ${g.routeRecorder.name}. Open", color = UiColors.BUTTON_ON) { host.show { RecordRouteScreen() } }
-        ui.button("Bus and ferry routes: ${g.busRoutes.all().size}", color = UiColors.BUTTON_ON) { host.show { BusRoutesScreen() } }
-        ui.info("A route is a bus line or ferry route with its stops in order. Stops can be places or islands. While you travel, stops are announced, and your own stop is warned before it comes.")
-        val list = g.routes.all().sortedBy { it.name.lowercase() }
-        if (list.isNotEmpty()) ui.heading("My routes")
-        list.forEach { r -> ui.button("${r.name}, ${r.stops.size} stops") { host.show { RouteEditScreen(r.id) } } }
-        ui.button("New route") {
-            host.show { TextInputScreen("New route", "Route name, for example Male bus R1", "") { name ->
-                val r = TripRoute(TripRoute.newId(), name, ArrayList())
-                g.routes.add(r)
-                host.backTo(this@RoutesScreen); host.show { RouteEditScreen(r.id) }
-            } }
-        }
-        if (!g.routeRecorder.active) ui.button("Record route while riding") {
-            if (!host.hasLocationPermission()) { host.requestPermissionsIfNeeded(); return@button }
-            host.show { TextInputScreen("Record route", "Route name", "") { name ->
-                g.routeRecorder.start(name)
-                host.backTo(this@RoutesScreen); host.show { RecordRouteScreen() }
-            } }
-        }
-        ui.button("Route settings") { host.show { RouteSettingsScreen() } }
-        ui.button("Back") { host.back() }
-        return scroll
-    }
-}
-
 class RouteSettingsScreen : Screen() {
     override fun create(): View {
         val s = AppGraph.settings
@@ -80,8 +46,9 @@ class RouteSettingsScreen : Screen() {
     }
 }
 
-/** One route: travel with it, edit its stops, add place or island stops. */
+/** One of your routes (place and island stops): Start or Stop, its stops, more options. */
 class RouteEditScreen(private val id: String) : Screen() {
+    private var wasActive = false
     override fun create(): View {
         val g = AppGraph
         val (scroll, ui) = UiBuilder.scrolling(host)
@@ -89,28 +56,59 @@ class RouteEditScreen(private val id: String) : Screen() {
         val r = g.routes.byId(id)
         if (r == null) { titleView = ui.title("Route not found"); ui.button("Back") { host.back() }; return scroll }
         titleView = ui.title(r.name)
-        if (r.stops.size >= 2) ui.button("Travel with this route", color = UiColors.BUTTON_ON) {
+        val islands = r.stops.count { it.isIsland }
+        ui.info(if (r.stops.isEmpty()) "No stops yet. Add stops in Stops." else
+            "From ${r.stops.first().name} to ${r.stops.last().name}, ${r.stops.size} stops" + (if (islands > 0) ", $islands islands" else "") + ". Made by you.")
+        val active = g.routeTrip.route?.id == r.id
+        wasActive = active
+        if (active) ui.button("Stop ride", color = UiColors.BUTTON_STOP) { g.routeTrip.stop(); rebuild() }
+        else if (r.stops.size >= 2) ui.button("Start", color = UiColors.BUTTON_ON) {
             if (!host.hasLocationPermission()) { host.requestPermissionsIfNeeded(); return@button }
-            host.show {
-                ChoiceScreen("Where do you get off?", null, r.stops.mapIndexed { i, s ->
-                    stopLabel(i, s) to { g.routeTrip.start(r, i); host.backTo(this@RouteEditScreen); host.show { RouteTripScreen() } }
-                })
+            confirmSwitchRide(host, r.name) {
+                host.show {
+                    ChoiceScreen("Where do you get off?", null, r.stops.mapIndexed { i, s ->
+                        stopLabel(i, s) to { g.routeTrip.start(r, i); host.backTo(this@RouteEditScreen); host.show { RouteTripScreen() } }
+                    })
+                }
             }
-        } else ui.info("Add at least 2 stops.")
-        ui.heading("Stops: ${r.stops.size}")
+        } else ui.info("Add at least 2 stops to start.")
+        ui.button("Stops (${r.stops.size})") { host.show { TripStopsScreen(id) } }
+        val self = this
+        ui.button("More options") {
+            host.show {
+                ChoiceScreen("More options", r.name, listOf(
+                    "Rename route" to {
+                        host.show { TextInputScreen("Rename route", "Route name", r.name) { n -> r.name = n; g.routes.save(); host.speak("Saved."); host.backTo(self) } }
+                    },
+                    "Delete route" to {
+                        host.show { ConfirmScreen("Delete the route ${r.name}?", "Delete") {
+                            if (g.routeTrip.route?.id == r.id) g.routeTrip.stop(silent = true)
+                            g.routes.delete(r.id); host.speak("Deleted."); host.backTo(self); host.back()
+                        } }
+                    }
+                ))
+            }
+        }
+        ui.button("Back") { host.back() }
+        return scroll
+    }
+
+    override fun onSecond() { if ((AppGraph.routeTrip.route?.id == id) != wasActive) rebuild() }
+}
+
+/** The stops of one of your routes: change them, add place or island stops. */
+class TripStopsScreen(private val id: String) : Screen() {
+    override fun create(): View {
+        val g = AppGraph
+        val (scroll, ui) = UiBuilder.scrolling(host)
+        PlacePick.handler = null
+        val r = g.routes.byId(id)
+        if (r == null) { titleView = ui.title("Route not found"); ui.button("Back") { host.back() }; return scroll }
+        titleView = ui.title("Stops of ${r.name}: ${r.stops.size}")
         r.stops.forEachIndexed { i, s -> ui.button(stopLabel(i, s)) { host.show { StopOptionsScreen(id, i) } } }
         ui.button("Add place stop") { addPlaceStop(r) }
         ui.button("Add island stop") {
-            host.show { AtollPickerScreen { isl -> addStop(r, islandStop(isl)); host.backTo(this@RouteEditScreen) } }
-        }
-        ui.button("Rename route") {
-            host.show { TextInputScreen("Rename route", "Route name", r.name) { n -> r.name = n; g.routes.save(); host.speak("Saved."); host.back() } }
-        }
-        ui.button("Delete route", color = UiColors.BUTTON_STOP) {
-            host.show { ConfirmScreen("Delete the route ${r.name}?", "Delete") {
-                if (g.routeTrip.route?.id == r.id) g.routeTrip.stop(silent = true)
-                g.routes.delete(r.id); host.speak("Deleted."); host.back(); host.back()
-            } }
+            host.show { AtollPickerScreen { isl -> addStop(r, islandStop(isl)); host.backTo(this@TripStopsScreen) } }
         }
         ui.button("Back") { host.back() }
         return scroll
@@ -124,7 +122,7 @@ class RouteEditScreen(private val id: String) : Screen() {
     private fun addPlaceStop(r: TripRoute) {
         val pick: (mv.haluvi.navigation.data.SavedLocation) -> Unit = { loc ->
             addStop(r, RouteStop(loc.name, loc.lat, loc.lon, RouteStop.KIND_PLACE))
-            host.backTo(this@RouteEditScreen)
+            host.backTo(this@TripStopsScreen)
         }
         host.show {
             ChoiceScreen("Add place stop", null, listOf(
@@ -134,12 +132,21 @@ class RouteEditScreen(private val id: String) : Screen() {
                     val f = AppGraph.location.fix
                     if (f == null || f.accuracy > 50) host.speak("GPS is not ready. Try again in an open area.")
                     else host.show { TextInputScreen("This location", "Stop name", "") { n ->
-                        addStop(r, RouteStop(n, f.lat, f.lon, RouteStop.KIND_PLACE)); host.backTo(this@RouteEditScreen)
+                        addStop(r, RouteStop(n, f.lat, f.lon, RouteStop.KIND_PLACE)); host.backTo(this@TripStopsScreen)
                     } }
                 }
             ))
         }
     }
+}
+
+/** Before starting a ride while another one runs: asks to stop that one first. */
+fun confirmSwitchRide(host: MainActivity, newName: String, start: () -> Unit) {
+    val cur = AppGraph.routeTrip.route
+    if (cur == null) { start(); return }
+    host.show { ConfirmScreen("Stop the ride on ${cur.name} and start $newName?", "Stop and start") {
+        AppGraph.routeTrip.stop(silent = true); host.back(); start()
+    } }
 }
 
 fun islandStop(isl: Island) = RouteStop(isl.name, isl.lat, isl.lon, RouteStop.KIND_ISLAND, isl.key)
@@ -218,7 +225,7 @@ class RouteTripScreen : Screen() {
                 }
             }
         }
-        ui.button("Stop route", color = UiColors.BUTTON_STOP) { trip.stop(); rebuild() }
+        ui.button("Stop ride", color = UiColors.BUTTON_STOP) { trip.stop(); rebuild() }
         ui.button("Back") { host.back() }
         return scroll
     }

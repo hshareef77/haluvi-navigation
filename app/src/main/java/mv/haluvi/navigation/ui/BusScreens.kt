@@ -16,7 +16,7 @@ import java.util.Locale
 
 const val RTL_CREDIT = "Bus and ferry data: RTL (Raajje Transport Link). Times can change."
 
-private fun distText(lat: Double, lon: Double): String {
+fun distText(lat: Double, lon: Double): String {
     val f = AppGraph.location.fix ?: return ""
     return ", " + Phrases.distance(Geo.distance(f.lat, f.lon, lat, lon)) +
         ", " + Phrases.where(AppGraph.compass.heading, Geo.bearing(f.lat, f.lon, lat, lon))
@@ -101,128 +101,87 @@ fun rideBus(host: MainActivity, r: BusRoute, off: Int? = null) {
     host.show { ChoiceScreen("Where do you get on?", "${routeTitle(r)}." + (off?.let { " Your stop: ${stopName(r, r.stops[it])}." } ?: ""), choices) }
 }
 
-/** The atolls a group of ferry routes serves: "Haa Alifu, Haa Dhaalu, Shaviyani". */
-private fun atollsOf(routes: List<BusRoute>): String {
-    val names = LinkedHashSet<String>()
-    for (r in routes) for (s in r.stops) stopIsland(s)?.atollFullName?.takeIf { it.isNotBlank() }?.let { names.add(it) }
-    return names.joinToString(", ")
+/** "Greater Malé", "Kulhudhuffushi", "Addu City" for RTL area names. */
+fun prettyArea(a: String): String = when {
+    a.isBlank() -> "Other"
+    a == "Greater Male" -> "Greater Malé"
+    else -> a.substringAfter('.').trim().replace("Kulhudhufushi", "Kulhudhuffushi")
 }
 
-/** Bus and ferry routes: RTL and OpenStreetMap routes built into the app, and your own. */
-class BusRoutesScreen : Screen() {
-    override fun create(): View {
-        val g = AppGraph
-        val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title("Bus and ferry routes")
-        g.routeTrip.route?.let { r -> ui.button("Riding: ${r.name}. Open", color = UiColors.BUTTON_ON) { host.show { RouteTripScreen() } } }
-        if (g.routeRecorder.active) ui.button("Recording: ${g.routeRecorder.name}. Open", color = UiColors.BUTTON_ON) { host.show { RecordRouteScreen() } }
-        val all = g.busRoutes.all()
-        ui.button("Which bus or ferry goes to a place?", color = UiColors.BUTTON_ON) {
-            host.show { ChoosePlaceScreen("Where do you want to go?") { loc -> host.show { BusesToPlaceScreen(loc.name, loc.lat, loc.lon) } } }
-        }
-        ui.button("Which ferry goes to an island?") {
-            host.show { AtollPickerScreen { isl -> host.show { BusesToPlaceScreen(isl.name, isl.lat, isl.lon, isl.key) } } }
-        }
-        val f = g.location.fix
-        if (f != null) {
-            val near = g.busRoutes.near(f.lat, f.lon, 500.0, 2000.0).take(12)
-            ui.heading(if (near.isEmpty()) "No bus or ferry stops near me" else "Near me")
-            near.forEach { h ->
-                val t = nextTimes(h.stop).takeIf { it.isNotBlank() }?.let { ", $it" } ?: ""
-                ui.button("${routeTitle(h.route)}: ${stopName(h.route, h.stop)}${distText(h.stop.lat, h.stop.lon)}$t") { host.show { BusRouteScreen(h.route.id) } }
-            }
-        }
-        val rtl = all.filter { it.fromRtl }
-        val buses = rtl.filter { !it.isFerry }.groupBy { it.area.ifBlank { "Other" } }
-        if (buses.isNotEmpty()) ui.heading("RTL buses and Male' ferries")
-        buses.toSortedMap(compareBy<String>({ if (it == "Greater Male") 0 else 1 }, { it })).forEach { (area, list) ->
-            val b = list.count { it.kind == BusRoute.KIND_BUS }; val v = list.size - b
-            ui.button("$area: " + listOfNotNull("$b bus routes".takeIf { b > 0 }, "$v ferries".takeIf { v > 0 }).joinToString(", ")) {
-                host.show { RouteListScreen(area, list.map { it.id }) }
-            }
-        }
-        val ferries = rtl.filter { it.isFerry }.groupBy { it.area.ifBlank { "Other" } }
-        if (ferries.isNotEmpty()) ui.heading("RTL ferry routes between islands")
-        ferries.toSortedMap().forEach { (zone, list) ->
-            val atolls = atollsOf(list)
-            ui.button("$zone: ${list.size} routes" + if (atolls.isNotBlank()) ", $atolls" else "") { host.show { RouteListScreen("Ferries, $zone", list.map { it.id }) } }
-        }
-        val other = all.filter { !it.fromRtl }
-        if (other.isNotEmpty()) {
-            ui.heading("Other routes")
-            ui.button("OpenStreetMap and my routes: ${other.size}") { host.show { RouteListScreen("Other routes", other.map { it.id }) } }
-        }
-        ui.button("Record a bus route on a ride") {
-            if (!host.hasLocationPermission()) { host.requestPermissionsIfNeeded(); return@button }
-            if (g.routeRecorder.active) { host.show { RecordRouteScreen() }; return@button }
-            host.show { TextInputScreen("Record a bus route", "Route name", "") { name ->
-                g.routeRecorder.start(name, bus = true)
-                host.backTo(this@BusRoutesScreen); host.show { RecordRouteScreen() }
-            } }
-        }
-        if (g.busRoutes.deletedCount() > 0) ui.button("Bring back ${g.busRoutes.deletedCount()} deleted routes") {
-            g.busRoutes.restore(null, BuiltinMaps.busRoutesJson(), BuiltinMaps.rtlJson()); host.speak("Brought back."); rebuild()
-        }
-        ui.info("$RTL_CREDIT Routes you change or record are kept when the data is updated. Map data: OpenStreetMap contributors.")
-        ui.button("Back") { host.back() }
-        return scroll
-    }
-}
-
-/** A list of routes (one area, or one ferry zone). */
-class RouteListScreen(private val title: String, private val ids: List<String>) : Screen() {
-    override fun create(): View {
-        val g = AppGraph
-        val (scroll, ui) = UiBuilder.scrolling(host)
-        titleView = ui.title(title)
-        ids.mapNotNull { g.busRoutes.byId(it) }.forEach { r ->
-            ui.button("${routeTitle(r)}, ${r.stops.size} stops" + if (r.edited || !r.builtin) ", changed by you" else "") { host.show { BusRouteScreen(r.id) } }
-        }
-        ui.button("Back") { host.back() }
-        return scroll
-    }
-}
-
-/** One route: ride it, its stops and times, fix it. */
-class BusRouteScreen(private val id: String) : Screen() {
+/** One bus or ferry route: Start or Stop, stops, times, more options. [nearIndex]: the stop near you (from Near me). */
+class BusRouteScreen(private val id: String, private val nearIndex: Int? = null) : Screen() {
+    private var wasActive = false
     override fun create(): View {
         val g = AppGraph
         val (scroll, ui) = UiBuilder.scrolling(host)
         val r = g.busRoutes.byId(id)
         if (r == null) { titleView = ui.title("Route not found"); ui.button("Back") { host.back() }; return scroll }
         titleView = ui.title(routeTitle(r))
-        val info = arrayListOf<String>()
-        info.add("From ${stopName(r, r.stops.first())} to ${stopName(r, r.stops.last())}, ${r.stops.size} stops.")
-        if (r.area.isNotBlank()) info.add("${r.area}.")
+        val info = arrayListOf("From ${stopName(r, r.stops.first())} to ${stopName(r, r.stops.last())}, ${r.stops.size} stops.")
+        if (r.area.isNotBlank() && !r.isFerry) info.add("${prettyArea(r.area)}.")
         if (r.fare.isNotBlank()) info.add("Fare ${r.fare.removeSuffix(".0")} rufiyaa.")
-        info.add(when {
-            !r.builtin -> "Made by you."
-            r.edited -> "Changed by you."
-            r.fromRtl -> "From RTL."
-            else -> "From OpenStreetMap."
-        })
+        info.add(when { !r.builtin -> "Made by you."; r.edited -> "Changed by you."; r.fromRtl -> "From RTL."; else -> "From OpenStreetMap." })
         ui.info(info.joinToString(" "))
-        if (r.stops.size >= 2) ui.button("Ride this ${kindWord(r)}", color = UiColors.BUTTON_ON) { rideBus(host, r) }
-        ui.heading("Stops")
+        val near = nearIndex?.takeIf { it in r.stops.indices }
+        val active = g.routeTrip.busRouteId == r.id
+        wasActive = active
+        if (active) ui.button("Stop ride", color = UiColors.BUTTON_STOP) { g.routeTrip.stop(); rebuild() }
+        else if (r.stops.size >= 2) ui.button("Start" + (near?.takeIf { it < r.stops.size - 1 }?.let { ", getting on at ${stopName(r, r.stops[it])}" } ?: ""), color = UiColors.BUTTON_ON) {
+            if (!host.hasLocationPermission()) { host.requestPermissionsIfNeeded(); return@button }
+            confirmSwitchRide(host, routeTitle(r)) {
+                if (near != null && near < r.stops.size - 1) host.show {
+                    ChoiceScreen("Where do you get off?", "Getting on at ${stopName(r, r.stops[near])}.", (near + 1 until r.stops.size).map { i ->
+                        "${stopLabel(r, i, r.stops[i])}, ${i - near} stops" to { startBusRide(host, r, near, i) }
+                    })
+                } else rideBus(host, r)
+            }
+        }
+        if (near != null) ui.button("Go to the stop: ${stopName(r, r.stops[near])}" + distText(r.stops[near].lat, r.stops[near].lon)) { goToBusStop(host, r, r.stops[near]) }
+        ui.button("Stops (${r.stops.size})") { host.show { BusStopsScreen(id) } }
+        val ts = r.stops[near ?: 0]
+        if (ts.times.isNotEmpty()) ui.button("Times at ${stopName(r, ts)}: ${nextTimes(ts)}") {
+            host.show { TextScreen("Times at ${stopName(r, ts)}", listOf(ts.times.joinToString(", "), RTL_CREDIT)) }
+        }
+        val self = this
+        ui.button("More options") {
+            val opts = ArrayList<Pair<String, () -> Unit>>()
+            opts.add("Rename route" to {
+                host.show { TextInputScreen("Rename route", "Route name", r.title) { n -> r.name = n; r.ref = ""; g.busRoutes.changed(r); host.speak("Saved."); host.backTo(self) } }
+            })
+            if (!r.isFerry) opts.add("Add a stop at the end" to { host.backTo(self); addStopAt(host, r, r.stops.size) })
+            if (r.builtin && r.edited) opts.add("Undo my changes" to {
+                host.show { ConfirmScreen("Undo your changes to ${routeTitle(r)}?", "Undo changes") {
+                    g.busRoutes.restore(r.id, BuiltinMaps.busRoutesJson(), BuiltinMaps.rtlJson()); host.speak("Restored."); host.backTo(self)
+                } }
+            })
+            opts.add("Delete route" to {
+                host.show { ConfirmScreen("Delete the route ${routeTitle(r)}?", "Delete") {
+                    if (g.routeTrip.busRouteId == r.id) g.routeTrip.stop(silent = true)
+                    g.busRoutes.delete(r.id); host.speak("Deleted."); host.backTo(self); host.back()
+                } }
+            })
+            host.show { ChoiceScreen("More options", routeTitle(r), opts) }
+        }
+        if (r.fromRtl) ui.info(RTL_CREDIT)
+        ui.button("Back") { host.back() }
+        return scroll
+    }
+
+    override fun onSecond() { if ((AppGraph.routeTrip.busRouteId == id) != wasActive) rebuild() }
+}
+
+/** The stops of a bus or ferry route, with distance and next times. */
+class BusStopsScreen(private val id: String) : Screen() {
+    override fun create(): View {
+        val g = AppGraph
+        val (scroll, ui) = UiBuilder.scrolling(host)
+        val r = g.busRoutes.byId(id)
+        if (r == null) { titleView = ui.title("Route not found"); ui.button("Back") { host.back() }; return scroll }
+        titleView = ui.title("Stops of ${routeTitle(r)}: ${r.stops.size}")
         r.stops.forEachIndexed { i, s ->
             val t = nextTimes(s, 2).takeIf { it.isNotBlank() }?.let { ", $it" } ?: ""
             ui.button(stopLabel(r, i, s) + distText(s.lat, s.lon) + t) { host.show { BusStopScreen(id, i) } }
         }
-        if (!r.isFerry) ui.button("Add a stop at the end") { addStopAt(host, r, r.stops.size) }
-        ui.button("Rename route") {
-            host.show { TextInputScreen("Rename route", "Route name", r.title) { n -> r.name = n; r.ref = ""; g.busRoutes.changed(r); host.speak("Saved."); host.back() } }
-        }
-        if (r.builtin && r.edited) ui.button("Undo my changes") {
-            host.show { ConfirmScreen("Undo your changes to ${routeTitle(r)}?", "Undo changes") {
-                g.busRoutes.restore(r.id, BuiltinMaps.busRoutesJson(), BuiltinMaps.rtlJson()); host.speak("Restored."); host.back()
-            } }
-        }
-        ui.button("Delete route", color = UiColors.BUTTON_STOP) {
-            host.show { ConfirmScreen("Delete the route ${routeTitle(r)}?", "Delete") {
-                g.busRoutes.delete(r.id); host.speak("Deleted."); host.back(); host.back()
-            } }
-        }
-        if (r.fromRtl) ui.info(RTL_CREDIT)
         ui.button("Back") { host.back() }
         return scroll
     }
