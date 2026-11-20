@@ -6,11 +6,28 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-/** One bus stop of a bus route. */
-data class BusStop(var name: String, var lat: Double, var lon: Double, val osm: Long = 0,
-                   var shelter: String = "", var bench: String = "") {
-    fun toJson(): JSONObject = JSONObject().put("name", name).put("lat", lat).put("lon", lon).put("osm", osm)
-        .put("shelter", shelter).put("bench", bench)
+/** One stop of a bus or ferry route. */
+data class BusStop(
+    var name: String,
+    var lat: Double,
+    var lon: Double,
+    val osm: Long = 0,
+    var shelter: String = "",
+    var bench: String = "",
+    /** RTL stop code. */
+    val code: String = "",
+    /** Dhivehi name. */
+    val dv: String = "",
+    /** Ferry stops: the island key ("HA:Dhidhoo"), when known. */
+    val island: String = "",
+    /** Times the bus leaves this stop, "06:30" (RTL timetable). */
+    val times: List<String> = emptyList()
+) {
+    fun toJson(): JSONObject {
+        val t = JSONArray(); times.forEach { t.put(it) }
+        return JSONObject().put("name", name).put("lat", lat).put("lon", lon).put("osm", osm)
+            .put("shelter", shelter).put("bench", bench).put("code", code).put("dv", dv).put("island", island).put("times", t)
+    }
 
     /** "with shelter and bench", or "" when not known. */
     val details: String get() {
@@ -20,15 +37,17 @@ data class BusStop(var name: String, var lat: Double, var lon: Double, val osm: 
 
     companion object {
         fun fromJson(o: JSONObject): BusStop? = runCatching {
+            val t = o.optJSONArray("times")
             BusStop(o.getString("name"), o.getDouble("lat"), o.getDouble("lon"), o.optLong("osm"),
-                o.optString("shelter"), o.optString("bench"))
+                o.optString("shelter"), o.optString("bench"), o.optString("code"), o.optString("dv"), o.optString("island"),
+                if (t == null) emptyList() else (0 until t.length()).map { t.getString(it) })
         }.getOrNull()
     }
 }
 
 /**
- * A bus route with its stops in order. Routes from OpenStreetMap ([osmId] > 0) are refreshed with each
- * built-in map update, unless you changed them ([edited]): your changes are kept.
+ * A bus or ferry route with its stops in order. Built-in routes ([key]: "rtl:bus:133", "osm:12345") are refreshed
+ * with each update of the app's data, unless you changed them ([edited]): your changes are kept.
  */
 data class BusRoute(
     val id: String,
@@ -39,34 +58,54 @@ data class BusRoute(
     var operator: String,
     val stops: MutableList<BusStop>,
     val osmId: Long = 0,
-    var edited: Boolean = false
+    var edited: Boolean = false,
+    /** Built-in source key, "" for routes you made. */
+    val key: String = if (osmId > 0) "osm:$osmId" else "",
+    /** "bus", "ferry" (island stops) or "vessel" (ferry between two terminals in Male'). */
+    val kind: String = KIND_BUS,
+    /** "Greater Male", "Addu City", "Zone 1" ... */
+    val area: String = "",
+    val fare: String = ""
 ) {
-    /** "R10 Orchid Route", without repeating the number. */
+    val isFerry: Boolean get() = kind == KIND_FERRY
+    val isBoat: Boolean get() = kind == KIND_FERRY || kind == KIND_VESSEL
+    val fromOsm: Boolean get() = key.startsWith("osm:")
+    val fromRtl: Boolean get() = key.startsWith("rtl:")
+    val builtin: Boolean get() = key.isNotBlank()
+
+    /** "R10 Orchid", without repeating the number. */
     val title: String get() = when {
-        ref.isBlank() -> name.ifBlank { "Bus route" }
+        ref.isBlank() -> name.ifBlank { "Route" }
         name.isBlank() -> "Route $ref"
         name.startsWith(ref, true) -> name
         else -> "$ref $name"
     }
-    val fromOsm: Boolean get() = osmId > 0
 
     fun toJson(): JSONObject {
         val arr = JSONArray(); stops.forEach { arr.put(it.toJson()) }
         return JSONObject().put("id", id).put("ref", ref).put("name", name).put("from", from).put("to", to)
             .put("operator", operator).put("stops", arr).put("osmId", osmId).put("edited", edited)
+            .put("key", key).put("kind", kind).put("area", area).put("fare", fare)
     }
 
     companion object {
+        const val KIND_BUS = "bus"
+        const val KIND_FERRY = "ferry"
+        const val KIND_VESSEL = "vessel"
+
         fun newId(): String = "bus_" + UUID.randomUUID().toString().replace("-", "").take(12)
         fun fromJson(o: JSONObject): BusRoute? = runCatching {
             val arr = o.getJSONArray("stops")
+            val osmId = o.optLong("osmId")
             BusRoute(o.optString("id").ifBlank { newId() }, o.optString("ref"), o.optString("name"), o.optString("from"),
                 o.optString("to"), o.optString("operator"),
                 (0 until arr.length()).mapNotNull { BusStop.fromJson(arr.getJSONObject(it)) }.toMutableList(),
-                o.optLong("osmId"), o.optBoolean("edited"))
+                osmId, o.optBoolean("edited"),
+                o.optString("key").ifBlank { if (osmId > 0) "osm:$osmId" else "" },
+                o.optString("kind", KIND_BUS).ifBlank { KIND_BUS }, o.optString("area"), o.optString("fare"))
         }.getOrNull()
 
-        /** A route from the built-in map file (OpenStreetMap). */
+        /** A route from the built-in OpenStreetMap file. */
         fun fromOsm(o: JSONObject): BusRoute? = runCatching {
             val arr = o.getJSONArray("stops")
             val osm = o.getLong("osm")
@@ -76,7 +115,24 @@ data class BusRoute(
                     val s = arr.getJSONObject(i)
                     runCatching { BusStop(s.getString("name"), s.getDouble("lat"), s.getDouble("lon"), s.optLong("osm"),
                         s.optString("shelter"), s.optString("bench")) }.getOrNull()
-                }.toMutableList(), osm)
+                }.toMutableList(), osm, area = "OpenStreetMap")
+        }.getOrNull()
+
+        /** A route from the built-in RTL file. */
+        fun fromRtl(o: JSONObject): BusRoute? = runCatching {
+            val kind = o.optString("kind", KIND_BUS)
+            val arr = o.getJSONArray("stops")
+            val stops = (0 until arr.length()).mapNotNull { i ->
+                val s = arr.getJSONObject(i)
+                val t = s.optJSONArray("times")
+                runCatching { BusStop(s.getString("name"), s.getDouble("lat"), s.getDouble("lon"), code = s.optString("code"),
+                    dv = s.optString("dv"), island = s.optString("island"),
+                    times = if (t == null) emptyList() else (0 until t.length()).map { t.getString(it) }) }.getOrNull()
+            }.toMutableList()
+            val code = o.getString("code")
+            val fare = if (o.has("fare") && !o.isNull("fare")) o.optString("fare") else ""
+            BusRoute("rtl_${kind}_$code", o.optString("ref"), o.optString("name"), stops.firstOrNull()?.name ?: "",
+                stops.lastOrNull()?.name ?: "", "RTL", stops, key = "rtl:$kind:$code", kind = kind, area = o.optString("area"), fare = fare)
         }.getOrNull()
     }
 }
@@ -86,79 +142,84 @@ data class BusStopHit(val route: BusRoute, val index: Int, val distance: Double)
     val stop: BusStop get() = route.stops[index]
 }
 
-/** All bus routes: from the built-in maps and your own. Stored as data (bus_routes.json), never in the code. */
+/** All bus and ferry routes: built in (RTL, OpenStreetMap) and your own. Stored as data (bus_routes.json), never in the code. */
 class BusRoutes(private val file: File) {
     private val items = ArrayList<BusRoute>()
-    /** OpenStreetMap routes you deleted: they do not come back with map updates. */
-    private val deletedOsm = HashSet<Long>()
-    /** The built-in map data the routes come from (its stamp). */
+    /** Built-in routes you deleted (their keys): they do not come back with updates. */
+    private val deleted = HashSet<String>()
+    /** The built-in data the routes come from (its stamp). */
     var mapStamp = ""; private set
 
     init { load() }
 
     @Synchronized fun all(): List<BusRoute> = items.sortedWith(compareBy({ refNumber(it.ref) }, { it.ref }, { it.title.lowercase() }))
     @Synchronized fun byId(id: String?): BusRoute? = items.firstOrNull { it.id == id }
-    @Synchronized fun deletedCount(): Int = deletedOsm.size
+    @Synchronized fun deletedCount(): Int = deleted.size
 
     private fun refNumber(ref: String): Int = Regex("\\d+").find(ref)?.value?.toIntOrNull() ?: Int.MAX_VALUE
 
     @Synchronized fun add(r: BusRoute) { items.removeAll { it.id == r.id }; items.add(r); save() }
 
-    /** Call after changing a route: it is marked as yours, so map updates keep your change. */
+    /** Call after changing a route: it is marked as yours, so updates keep your change. */
     @Synchronized fun changed(r: BusRoute) { r.edited = true; save() }
 
     @Synchronized
     fun delete(id: String) {
         val r = byId(id) ?: return
-        if (r.fromOsm) deletedOsm.add(r.osmId)
+        if (r.builtin) deleted.add(r.key)
         items.remove(r); save()
     }
 
-    /** Brings back deleted map routes and undoes your changes to [id] (or to all map routes when null). */
+    /** Brings back deleted built-in routes (when [id] is null) or undoes your changes to route [id]. */
     @Synchronized
-    fun restoreFromMap(id: String?, builtin: JSONObject?) {
-        if (id == null) deletedOsm.clear()
-        else byId(id)?.let { if (it.fromOsm) it.edited = false }
-        if (builtin != null) loadBuiltin(builtin, mapStamp, force = true) else save()
+    fun restore(id: String?, osm: JSONObject?, rtl: JSONObject?) {
+        if (id == null) deleted.clear() else byId(id)?.let { if (it.builtin) it.edited = false }
+        loadBuiltin(osm, rtl, mapStamp, force = true)
     }
 
     /**
-     * Takes the bus routes of the built-in maps: new ones are added, unchanged ones updated, ones no longer in the
-     * map removed. Routes you changed, made or deleted stay as you left them.
+     * Takes the built-in routes: RTL first, then OpenStreetMap routes that RTL does not have (same number).
+     * New ones are added, unchanged ones updated, ones no longer there removed. Routes you changed, made or deleted
+     * stay as you left them.
      */
     @Synchronized
-    fun loadBuiltin(o: JSONObject, stamp: String, force: Boolean = false): Int {
+    fun loadBuiltin(osm: JSONObject?, rtl: JSONObject?, stamp: String, force: Boolean = false): Int {
         if (!force && stamp == mapStamp) return 0
-        val arr = o.optJSONArray("routes") ?: return 0
-        val seen = HashSet<Long>()
+        val incoming = ArrayList<BusRoute>()
+        rtl?.optJSONArray("routes")?.let { arr -> for (i in 0 until arr.length()) BusRoute.fromRtl(arr.getJSONObject(i))?.let { incoming.add(it) } }
+        val rtlRefs = incoming.filter { it.kind == BusRoute.KIND_BUS }.map { it.ref.lowercase() }.toSet()
+        osm?.optJSONArray("routes")?.let { arr ->
+            for (i in 0 until arr.length()) BusRoute.fromOsm(arr.getJSONObject(i))?.let { if (it.ref.lowercase() !in rtlRefs) incoming.add(it) }
+        }
+        val seen = HashSet<String>()
         var n = 0
-        for (i in 0 until arr.length()) {
-            val r = BusRoute.fromOsm(arr.getJSONObject(i)) ?: continue
+        for (r in incoming) {
             if (r.stops.size < 2) continue
-            seen.add(r.osmId)
-            if (r.osmId in deletedOsm) continue
-            val old = items.firstOrNull { it.osmId == r.osmId }
+            seen.add(r.key)
+            if (r.key in deleted) continue
+            val old = items.firstOrNull { it.key == r.key }
             if (old != null && old.edited) continue
-            items.removeAll { it.osmId == r.osmId }
+            items.removeAll { it.key == r.key }
             items.add(r); n++
         }
-        items.removeAll { it.fromOsm && !it.edited && it.osmId !in seen }
+        items.removeAll { it.builtin && !it.edited && it.key !in seen }
         mapStamp = stamp
         save()
         return n
     }
 
-    /** Stops of all routes within [radius] of a point: the nearest stop of each route. */
+    /** The nearest stop of each route within [radius] (boats: [boatRadius]) of a point. */
     @Synchronized
-    fun near(lat: Double, lon: Double, radius: Double): List<BusStopHit> {
+    fun near(lat: Double, lon: Double, radius: Double, boatRadius: Double = radius, kinds: Set<String>? = null): List<BusStopHit> {
         val out = ArrayList<BusStopHit>()
         for (r in items) {
+            if (kinds != null && r.kind !in kinds) continue
             var best = -1; var bestD = Double.MAX_VALUE
             r.stops.forEachIndexed { i, s ->
                 val d = Geo.distance(lat, lon, s.lat, s.lon)
                 if (d < bestD) { bestD = d; best = i }
             }
-            if (best >= 0 && bestD <= radius) out.add(BusStopHit(r, best, bestD))
+            if (best >= 0 && bestD <= (if (r.isBoat) boatRadius else radius)) out.add(BusStopHit(r, best, bestD))
         }
         return out.sortedBy { it.distance }
     }
@@ -168,30 +229,41 @@ class BusRoutes(private val file: File) {
         r.stops.indices.map { BusStopHit(r, it, Geo.distance(lat, lon, r.stops[it].lat, r.stops[it].lon)) }
             .filter { it.distance <= radius }.sortedBy { it.distance }
 
-    /** The part of a route from stop [on] to stop [off], as a route to travel with. */
-    fun trip(r: BusRoute, on: Int, off: Int): TripRoute =
-        TripRoute("bus:${r.id}:$on", r.title, r.stops.subList(on, off + 1).map { RouteStop(it.name, it.lat, it.lon, RouteStop.KIND_PLACE) }.toMutableList())
+    /** Every stop of the RTL bus routes, once per stop code, for the places list. */
+    @Synchronized
+    fun allBusStops(): List<BusStop> {
+        val seen = HashSet<String>()
+        val out = ArrayList<BusStop>()
+        for (r in items) {
+            if (r.kind != BusRoute.KIND_BUS || !r.fromRtl) continue
+            for (s in r.stops) {
+                val k = s.code.ifBlank { s.name.lowercase() + "@" + String.format(java.util.Locale.US, "%.4f,%.4f", s.lat, s.lon) }
+                if (seen.add(k)) out.add(s)
+            }
+        }
+        return out
+    }
 
     @Synchronized
     fun save() {
         val arr = JSONArray(); items.forEach { arr.put(it.toJson()) }
-        val del = JSONArray(); deletedOsm.forEach { del.put(it) }
-        runCatching { file.writeText(JSONObject().put("routes", arr).put("deletedOsm", del).put("mapStamp", mapStamp).toString()) }
+        val del = JSONArray(); deleted.forEach { del.put(it) }
+        runCatching { file.writeText(JSONObject().put("routes", arr).put("deleted", del).put("mapStamp", mapStamp).toString()) }
     }
 
-    /** Your own and changed bus routes, for backups (map routes come with the app). */
+    /** Your own and changed routes, for backups (built-in routes come with the app). */
     @Synchronized
-    fun exportJson(): JSONArray { val arr = JSONArray(); items.filter { !it.fromOsm || it.edited }.forEach { arr.put(it.toJson()) }; return arr }
+    fun exportJson(): JSONArray { val arr = JSONArray(); items.filter { !it.builtin || it.edited }.forEach { arr.put(it.toJson()) }; return arr }
 
-    /** Adds bus routes from a backup; nothing is deleted. Returns how many were added or updated. */
+    /** Adds routes from a backup; nothing is deleted. Returns how many were added or updated. */
     @Synchronized
     fun import(arr: JSONArray): Int {
         var n = 0
         for (i in 0 until arr.length()) {
             val r = BusRoute.fromJson(arr.getJSONObject(i)) ?: continue
-            if (r.fromOsm) {
+            if (r.builtin) {
                 if (!r.edited) continue
-                items.removeAll { it.osmId == r.osmId }; items.add(r); n++
+                items.removeAll { it.key == r.key }; items.add(r); n++
             } else {
                 val same = items.any { it.title.equals(r.title, true) && it.stops.map { s -> s.name } == r.stops.map { s -> s.name } }
                 if (same) continue
@@ -203,13 +275,14 @@ class BusRoutes(private val file: File) {
     }
 
     private fun load() {
-        items.clear(); deletedOsm.clear()
+        items.clear(); deleted.clear()
         if (!file.exists()) return
         runCatching {
             val o = JSONObject(file.readText())
             val arr = o.getJSONArray("routes")
             for (i in 0 until arr.length()) BusRoute.fromJson(arr.getJSONObject(i))?.let { items.add(it) }
-            o.optJSONArray("deletedOsm")?.let { d -> for (i in 0 until d.length()) deletedOsm.add(d.getLong(i)) }
+            o.optJSONArray("deleted")?.let { d -> for (i in 0 until d.length()) deleted.add(d.getString(i)) }
+            o.optJSONArray("deletedOsm")?.let { d -> for (i in 0 until d.length()) deleted.add("osm:" + d.getLong(i)) }
             mapStamp = o.optString("mapStamp")
         }
     }

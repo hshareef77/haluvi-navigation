@@ -88,6 +88,8 @@ data class SavedLocation(
         const val SOURCE_OSM_MAP = "osm_map"
         const val SOURCE_GOOGLE = "google"
         const val SOURCE_OSM_SEARCH = "osm_search"
+        /** Bus stops from RTL (Raajje Transport Link), built into the app. */
+        const val SOURCE_RTL = "rtl"
 
         fun newId(): String = "loc_" + UUID.randomUUID().toString().replace("-", "").take(16)
 
@@ -223,6 +225,16 @@ class LocationStore(private val context: Context, private val islands: IslandRep
         save()
         File(roadsDir, safeName(islandKey) + ".json").delete()
         return before - _items.size
+    }
+
+    /** Replaces all places of one built-in source (for example RTL bus stops) with [list]. Returns how many were added. */
+    @Synchronized
+    fun replaceSource(source: String, list: List<SavedLocation>): Int {
+        _items.removeAll { it.source == source }
+        var n = 0
+        list.forEach { if (findDuplicate(it.name, it.lat, it.lon) == null) { ensureIsland(it); _items.add(it); n++ } }
+        save()
+        return n
     }
 
     /** Deletes the places of one source (for example all Google places) on an island. Returns how many. */

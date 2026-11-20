@@ -35,11 +35,30 @@ object BuiltinMaps {
         JSONObject(AppGraph.appContext.assets.open("osm/bus_routes.json").bufferedReader(Charsets.UTF_8).use { it.readText() })
     }.getOrNull()
 
-    /** Takes the bus routes of these built-in maps when they are new (your own changes are kept). */
+    /** RTL bus and ferry routes with stops, positions and times (assets/rtl/rtl_transport.json), or null. */
+    fun rtlJson(): JSONObject? = runCatching {
+        JSONObject(AppGraph.appContext.assets.open("rtl/rtl_transport.json").bufferedReader(Charsets.UTF_8).use { it.readText() })
+    }.getOrNull()
+
+    /** Changes when the OpenStreetMap or the RTL data in the app changes. */
+    fun transportStamp(): String = (stamp() ?: "") + "|" + (rtlJson()?.optString("date") ?: "") + "|t1"
+
+    /**
+     * Takes the bus and ferry routes of the app's data when they are new (your own changes are kept), and puts
+     * every RTL bus stop in the places list (category Bus stop).
+     */
     fun loadBusRoutesIfNew() {
-        val st = stamp() ?: return
+        val st = transportStamp()
         if (AppGraph.busRoutes.mapStamp == st) return
-        busRoutesJson()?.let { AppGraph.busRoutes.loadBuiltin(it, st) }
+        val rtl = rtlJson()
+        AppGraph.busRoutes.loadBuiltin(busRoutesJson(), rtl, st)
+        if (rtl != null) {
+            val stops = AppGraph.busRoutes.allBusStops()
+            AppGraph.store.replaceSource(mv.haluvi.navigation.data.SavedLocation.SOURCE_RTL, stops.map { s ->
+                mv.haluvi.navigation.data.SavedLocation(mv.haluvi.navigation.data.SavedLocation.newId(), s.name, s.lat, s.lon, 0.0,
+                    source = mv.haluvi.navigation.data.SavedLocation.SOURCE_RTL, categoryId = "bus")
+            })
+        }
     }
 
     fun has(atollCode: String): Boolean = index()?.optJSONObject("atolls")?.has(atollCode) == true

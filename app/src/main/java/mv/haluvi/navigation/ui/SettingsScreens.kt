@@ -52,6 +52,7 @@ class SettingsScreen : Screen() {
                 "Accessible navigation for blind and low vision people in the Maldives.",
                 "Developed by Hussain Shareef.",
                 "Map data © OpenStreetMap contributors, available under the Open Database License (openstreetmap.org/copyright).",
+                "Bus and ferry routes, stops and times: RTL (Raajje Transport Link), from its public route data. Times can change: check with RTL.",
                 "Places can also come from Google Maps when you turn it on."
             )) }
         }

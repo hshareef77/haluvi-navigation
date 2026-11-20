@@ -22,6 +22,7 @@ fun sourceName(source: String): String = when (source) {
     SavedLocation.SOURCE_MANUAL -> "Saved by me"
     SavedLocation.SOURCE_OSM_MAP -> "OpenStreetMap"
     SavedLocation.SOURCE_GOOGLE -> "Google"
+    SavedLocation.SOURCE_RTL -> "RTL bus stops"
     else -> "Search results"
 }
 
@@ -91,7 +92,7 @@ fun exportBackup(host: MainActivity, share: List<Island>? = null, label: String 
                     val keys = (share ?: allIslands).map { it.key }.toSet()
                     val root = if (share == null) org.json.JSONObject(g.store.exportJson()) else {
                         val arr = org.json.JSONArray()
-                        g.store.items.filter { it.islandKey in keys && it.source != SavedLocation.SOURCE_GOOGLE }.forEach { arr.put(it.toJson()) }
+                        g.store.items.filter { it.islandKey in keys && it.source != SavedLocation.SOURCE_GOOGLE && it.source != SavedLocation.SOURCE_RTL }.forEach { arr.put(it.toJson()) }
                         val names = org.json.JSONArray()
                         val all = g.store.roadNames.exportJson()
                         for (i in 0 until all.length()) { val o = all.getJSONObject(i); if (o.optString("island") in keys) names.put(o) }
@@ -137,8 +138,8 @@ class PlaceScreen(private val id: String) : Screen() {
         if (loc.hasAccess) parts.add("Saved with its side of the road.")
         ui.info(parts.joinToString(" "))
         ui.button("Go there", color = UiColors.BUTTON_ON) { goToPlace(host, loc) }
-        val buses = g.busRoutes.near(loc.lat, loc.lon, 500.0)
-        if (buses.isNotEmpty()) ui.button("Which bus goes here? ${buses.size} routes") { host.show { BusesToPlaceScreen(loc.name, loc.lat, loc.lon) } }
+        val buses = g.busRoutes.near(loc.lat, loc.lon, 500.0, 2500.0)
+        if (buses.isNotEmpty()) ui.button("Which bus or ferry goes here? ${buses.size} routes") { host.show { BusesToPlaceScreen(loc.name, loc.lat, loc.lon) } }
         ui.button("Edit") { host.show { EditPlaceScreen(id) } }
         ui.button("Move to another island") {
             fun move(isl: Island) { mv.haluvi.navigation.nav.JoinedIslands.moveTo(loc, isl); host.speak("${loc.name} is now on ${isl.name}."); host.backTo(this@PlaceScreen) }

@@ -37,7 +37,7 @@ class RoutesScreen : Screen() {
         PlacePick.handler = null
         g.routeTrip.route?.let { r -> ui.button("Travelling: ${r.name}. Open", color = UiColors.BUTTON_ON) { host.show { RouteTripScreen() } } }
         if (g.routeRecorder.active) ui.button("Recording: ${g.routeRecorder.name}. Open", color = UiColors.BUTTON_ON) { host.show { RecordRouteScreen() } }
-        ui.button("Bus routes: ${g.busRoutes.all().size}", color = UiColors.BUTTON_ON) { host.show { BusRoutesScreen() } }
+        ui.button("Bus and ferry routes: ${g.busRoutes.all().size}", color = UiColors.BUTTON_ON) { host.show { BusRoutesScreen() } }
         ui.info("A route is a bus line or ferry route with its stops in order. Stops can be places or islands. While you travel, stops are announced, and your own stop is warned before it comes.")
         val list = g.routes.all().sortedBy { it.name.lowercase() }
         if (list.isNotEmpty()) ui.heading("My routes")
@@ -193,7 +193,7 @@ class RouteTripScreen : Screen() {
         ui.button("Repeat") { host.speak(trip.repeatText()) }
         ui.button("Where am I") { whereAmI(host) }
         val bus = trip.busRouteId?.let { AppGraph.busRoutes.byId(it) }
-        if (bus != null) {
+        if (bus != null && !bus.isFerry) {
             // Fixing the bus route on a ride: saved for your next rides.
             ui.button("A stop is missing here: add it") {
                 val f = AppGraph.location.fix
@@ -202,7 +202,7 @@ class RouteTripScreen : Screen() {
                 val at = (trip.busOnIndex + trip.nextIndex).coerceIn(0, bus.stops.size)
                 fun add(n: String, lat: Double, lon: Double) {
                     bus.stops.add(at, mv.haluvi.navigation.data.BusStop(n, lat, lon)); AppGraph.busRoutes.changed(bus)
-                    host.speak("Added $n to ${bus.title}. It is used from your next ride.")
+                    host.speak("Added $n to ${routeTitle(bus)}. It is used from your next ride.")
                 }
                 if (near != null) add(near.name, near.lat, near.lon)
                 else host.show { TextInputScreen("Stop name", "Stop name", "") { n -> add(n, f.lat, f.lon); host.back() } }
