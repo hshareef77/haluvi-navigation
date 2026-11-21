@@ -112,6 +112,11 @@ class NavigationScreen : Screen() {
             "Repeat" to { host.speak(nav.repeatText()) },
             "Where is it?" to { host.speak(nav.whereIsItText()) }
         )
+        if (t.kind == mv.haluvi.navigation.nav.NavKind.PLACE) ui.button("Route steps") {
+            val loc = t.placeId?.let { g.store.byId(it) }
+                ?: mv.haluvi.navigation.data.SavedLocation(mv.haluvi.navigation.data.SavedLocation.newId(), t.name, t.lat, t.lon, 0.0)
+            host.show { RouteStepsScreen(loc, null, null, forNavigation = true) }
+        }
         ui.button("What's in this direction") { host.speak(Surroundings.inDirection()) }
         ui.button("More details") { host.show { DetailsScreen() } }
         ui.button("Stop navigation", color = UiColors.BUTTON_STOP) { nav.stop(); host.showHome() }

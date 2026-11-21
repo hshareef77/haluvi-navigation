@@ -89,6 +89,13 @@ class PlacesScreen : Screen() {
                 else -> { g.nav.start(Destination.of(dest)); host.showNavigation() }
             }
         }
+        ui.button("Route steps: hear the whole route first") {
+            val dest = Selection.placeTo
+            if (dest == null) { host.speak("Please choose where to go."); return@button }
+            val from = g.store.byId(s.placeFromId)
+            if (from == null && !host.hasLocationPermission()) { host.requestPermissionsIfNeeded(); return@button }
+            host.show { RouteStepsScreen(dest, from?.lat, from?.lon, forNavigation = false) }
+        }
         if (to != null && g.store.byId(to.id) == null && g.store.findDuplicate(to.name, to.lat, to.lon, to.placeId) == null) {
             ui.button("Save ${to.name} to my places") { g.store.add(to); host.speak("Saved."); rebuild() }
         }

@@ -34,7 +34,9 @@ data class RouteStep(
     val durationSeconds: Double,
     val start: LatLon?,
     val end: LatLon?,
-    val polyline: List<LatLon>
+    val polyline: List<LatLon>,
+    /** Side roads passed on this step without turning (offline routes). */
+    val sideRoads: Int = 0
 )
 
 data class Route(
@@ -42,7 +44,16 @@ data class Route(
     val distanceMeters: Double,
     val durationSeconds: Double,
     val summary: String,
-    val source: String
+    val source: String,
+    /** "easiest", "shortest", "fewest turns", "another way" (offline alternatives). */
+    val label: String = "",
+    val turns: Int = 0,
+    /** Main roads crossed on the way. */
+    val crossings: Int = 0,
+    /** The road most of the route is on. */
+    val mainRoad: String = "",
+    /** Lower is easier (offline routes). */
+    val score: Double = 0.0
 )
 
 data class ReverseGeocode(val road: String, val island: String, val address: String)

@@ -22,6 +22,8 @@ object OfflineRouter {
     private val NOT_FOR_DRIVING = setOf("footway", "path", "steps", "pedestrian", "cycleway")
 
     private class Edge(val to: Int, val length: Double, val road: Int)
+    private val MAJOR = setOf("primary", "secondary", "tertiary")
+    private val MINOR = setOf("footway", "path", "steps", "track", "service", "cycleway")
 
     private class Graph {
         val nodes = ArrayList<LatLon>()
@@ -59,9 +61,15 @@ object OfflineRouter {
      * Calculates a route, or returns null when no roads are downloaded or the points cannot be connected.
      * [destinationName] is used in the final instruction.
      */
-    fun route(from: LatLon, to: LatLon, mode: TravelMode): Route? {
+    fun route(from: LatLon, to: LatLon, mode: TravelMode): Route? = routes(from, to, mode, 1).firstOrNull()
+
+    /**
+     * Up to [max] clearly different routes, easiest first: fewest turns, named and main roads rather than small lanes,
+     * fewest main roads to cross. Alternatives are found by making the roads of earlier routes more costly.
+     */
+    fun routes(from: LatLon, to: LatLon, mode: TravelMode, max: Int = 3): List<Route> {
         val roads = roadsFor(from, to).filter { mode == TravelMode.WALKING || it.kind !in NOT_FOR_DRIVING }
-        if (roads.isEmpty()) return null
+        if (roads.isEmpty()) return emptyList()
         val g = Graph()
         roads.forEachIndexed { ri, r ->
             var prev = -1
@@ -71,12 +79,52 @@ object OfflineRouter {
                 prev = n
             }
         }
-        val start = snap(g, roads, from) ?: return null
-        val end = snap(g, roads, to) ?: return null
+        val start = snap(g, roads, from) ?: return emptyList()
+        val end = snap(g, roads, to) ?: return emptyList()
         val maxSnap = if (mode == TravelMode.WALKING) 150.0 else 250.0
-        if (start.second > maxSnap || end.second > maxSnap) return null
-        val path = astar(g, start.first, end.first) ?: return null
-        return buildRoute(g, roads, path, from, to, start.second, end.second, mode)
+        if (start.second > maxSnap || end.second > maxSnap) return emptyList()
+
+        fun ease(e: Edge): Double {
+            val r = roads.getOrNull(e.road) ?: return 1.0
+            return when {
+                r.kind in MINOR -> 1.35
+                r.name.isBlank() -> 1.15
+                else -> 1.0
+            }
+        }
+        val penalized = HashSet<Long>()
+        fun key(a: Int, b: Int) = minOf(a, b).toLong() * 10_000_000L + maxOf(a, b)
+        val paths = ArrayList<List<Int>>()
+        fun accept(p: List<Int>?) {
+            if (p == null || p.size < 2) return
+            val edges = (0 until p.size - 1).map { key(p[it], p[it + 1]) }.toSet()
+            // A clearly different route: less than 80 percent shared with any route found so far.
+            val same = paths.any { q ->
+                val qe = (0 until q.size - 1).map { key(q[it], q[it + 1]) }.toSet()
+                edges.intersect(qe).size >= 0.8 * minOf(edges.size, qe.size)
+            }
+            if (!same) paths.add(p)
+            edges.forEach { penalized.add(it) }
+        }
+        accept(astar(g, start.first, end.first) { _, e -> e.length })
+        accept(astar(g, start.first, end.first) { _, e -> e.length * ease(e) })
+        if (max > 1) repeat(4) {
+            accept(astar(g, start.first, end.first) { u, e -> e.length * ease(e) * (if (key(u, e.to) in penalized) 1.8 else 1.0) })
+        }
+        if (paths.isEmpty()) return emptyList()
+        val built = paths.map { buildRoute(g, roads, it, from, to, start.second, end.second, mode) }
+        val shortest = built.minOf { it.distanceMeters }
+        val ok = built.filter { it.distanceMeters <= shortest * 1.5 + 100 }.sortedBy { it.score }.take(max)
+        if (ok.size == 1) return listOf(ok[0].copy(label = "only route"))
+        val minTurns = ok.minOf { it.turns }
+        return ok.mapIndexed { i, r ->
+            r.copy(label = when {
+                i == 0 -> "easiest"
+                r.distanceMeters <= shortest + 1 -> "shortest"
+                r.turns == minTurns -> "fewest turns"
+                else -> "another way"
+            })
+        }
     }
 
     /** Adds the closest point on any road as a node (splitting that road piece). Returns node and distance. */
@@ -106,7 +154,7 @@ object OfflineRouter {
         return n to d
     }
 
-    private fun astar(g: Graph, s: Int, t: Int): List<Int>? {
+    private fun astar(g: Graph, s: Int, t: Int, weight: (Int, Edge) -> Double): List<Int>? {
         val dist = DoubleArray(g.nodes.size) { Double.MAX_VALUE }
         val prev = IntArray(g.nodes.size) { -1 }
         val goal = g.nodes[t]
@@ -118,7 +166,7 @@ object OfflineRouter {
             val (_, u) = pq.poll()!!
             if (u == t) break
             for (e in g.adj[u]) {
-                val nd = dist[u] + e.length
+                val nd = dist[u] + weight(u, e)
                 if (nd < dist[e.to]) { dist[e.to] = nd; prev[e.to] = u; pq.add((nd + h(e.to)) to e.to) }
             }
         }
@@ -172,9 +220,10 @@ object OfflineRouter {
         val segRoad = (0 until path.size - 1).map { i -> g.adj[path[i]].firstOrNull { it.to == path[i + 1] }?.road ?: -1 }
 
         // Find maneuver points.
-        data class Turn(val at: Int, val action: String)
+        data class Turn(val at: Int, val action: String, val sideRoads: Int)
         val turns = ArrayList<Turn>()
         var sideCountLeft = 0; var sideCountRight = 0
+        var crossings = 0
         for (i in 1 until pts.size - 1) {
             val inB = bearingIn(pts, i); val outB = bearingOut(pts, i)
             val angle = -Geo.headingDifference(inB, outB) // positive = right turn
@@ -183,6 +232,9 @@ object OfflineRouter {
             val node = path[i]
             val others = g.adj[node].filter { it.to != path[i - 1] && it.to != path[i + 1] }
             if (word == null) {
+                val ourName = segRoad.getOrNull(i)?.let { roads.getOrNull(it)?.name }.orEmpty()
+                if (others.any { e -> roads.getOrNull(e.road)?.let { it.kind in MAJOR && (it.name.isBlank() || it.name != ourName) } == true &&
+                        (roads.getOrNull(segRoad.getOrNull(i) ?: -1)?.kind ?: "") !in MAJOR }) crossings++
                 for (e in others) {
                     val ob = bearing(pts[i], g.nodes[e.to])
                     val rel = -Geo.headingDifference(inB, ob)
@@ -199,10 +251,11 @@ object OfflineRouter {
             val roadName = segRoad.getOrNull(i)?.let { roads.getOrNull(it)?.name }.orEmpty()
             if (roadName.isNotBlank() && !action.startsWith("make")) action += if (action.startsWith("take")) ", $roadName" else " onto $roadName"
             landmark(pts[i])?.let { action += " at $it" }
-            turns.add(Turn(i, action))
+            turns.add(Turn(i, action, sideCountLeft + sideCountRight))
             sideCountLeft = 0; sideCountRight = 0
         }
 
+        val restSide = sideCountLeft + sideCountRight
         // Steps: departure, one per turn, arrival.
         val steps = ArrayList<RouteStep>()
         val cut = listOf(0) + turns.map { it.at } + listOf(pts.size - 1)
@@ -225,7 +278,8 @@ object OfflineRouter {
                 instruction = action.replaceFirstChar { it.uppercase() } + if (roadName.isNotBlank() && s == 0) " on $roadName" else "",
                 spokenAction = action, maneuver = maneuver, roadName = roadName,
                 distanceMeters = len, durationSeconds = len / speed,
-                start = poly.first(), end = poly.last(), polyline = poly
+                start = poly.first(), end = poly.last(), polyline = poly,
+                sideRoads = if (s < turns.size) turns[s].sideRoads else restSide
             ))
         }
         // Final step: from the road to the destination itself.
@@ -243,6 +297,17 @@ object OfflineRouter {
             start = pts.last(), end = to, polyline = listOf(pts.last(), to)
         ))
         val total = steps.sumOf { it.distanceMeters }
-        return Route(steps, total, total / speed, "", "Offline")
+        // The road most of the route is on, and how much of it is on small lanes and paths.
+        val byRoad = HashMap<String, Double>()
+        var minor = 0.0
+        for (i in 0 until pts.size - 1) {
+            val r = roads.getOrNull(segRoad[i]) ?: continue
+            val d = Geo.distance(pts[i].lat, pts[i].lon, pts[i + 1].lat, pts[i + 1].lon)
+            if (r.name.isNotBlank()) byRoad[r.name] = (byRoad[r.name] ?: 0.0) + d
+            if (r.kind in MINOR || r.name.isBlank()) minor += d
+        }
+        val main = byRoad.maxByOrNull { it.value }?.takeIf { it.value >= total * 0.3 }?.key.orEmpty()
+        val score = total + 40.0 * turns.size + 80.0 * crossings + 0.35 * minor
+        return Route(steps, total, total / speed, "", "Offline", turns = turns.size, crossings = crossings, mainRoad = main, score = score)
     }
 }

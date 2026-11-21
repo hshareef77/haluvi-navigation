@@ -100,6 +100,8 @@ class NavigationEngine(
     var stepIndex = 0; private set
     private var routeBusy = false
     private var lastRouteRequestMs = 0L
+    /** Changes when you choose a route yourself (Route steps), so an older route request does not replace it. */
+    private var routeGen = 0
     private val spokenManeuvers = HashSet<String>()
     private var offRouteCount = 0
     private var stepLiveIndex = -1
@@ -532,6 +534,7 @@ class NavigationEngine(
         routeMessage = if (route == null) "Getting route." else "Updating route."
         val mode = settings.travelMode
         val targetAtRequest = t
+        val genAtRequest = routeGen
         val useGoogle = settings.googleReady
         scope.launch {
             var r: Route? = null
@@ -546,7 +549,7 @@ class NavigationEngine(
                 }
             }
             routeBusy = false
-            if (target != targetAtRequest) return@launch
+            if (target != targetAtRequest || routeGen != genAtRequest) return@launch
             val got = r
             if (got != null && got.steps.isNotEmpty()) {
                 val rerouted = route != null || spokenManeuvers.isNotEmpty()
@@ -562,6 +565,19 @@ class NavigationEngine(
             }
             notifyChanged()
         }
+    }
+
+    /** Follows a route you chose in Route steps (instead of the one found automatically). */
+    fun useRoute(r: Route) {
+        if (target?.kind != NavKind.PLACE || r.steps.isEmpty()) return
+        routeGen++
+        routeBusy = false
+        lastRouteRequestMs = now
+        route = r; stepIndex = 0; spokenManeuvers.clear(); offRouteCount = 0
+        stepLiveIndex = -1; stepLiveRemaining = null; lastRemaining = null
+        routeMessage = "Your chosen route: ${Phrases.distance(r.distanceMeters)}, about ${Fmt.duration(r.durationSeconds)}."
+        location.fix?.let { routeTick(it, r, smoothedSpeed, announceFirst = true) }
+        notifyChanged()
     }
 
     /** Re-requests the route, e.g. after the travel mode changes. */
